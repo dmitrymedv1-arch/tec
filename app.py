@@ -5,6 +5,8 @@ from scipy.optimize import curve_fit
 import pandas as pd
 import io
 import warnings
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
 warnings.filterwarnings('ignore')
 
 # Set plot style for scientific publications
@@ -24,9 +26,8 @@ plt.rcParams.update({
     'legend.frameon': True,
     'legend.framealpha': 0.9,
     'legend.edgecolor': 'black',
-    'figure.figsize': (4, 3),
-    'figure.dpi': 150,
-    'savefig.dpi': 300,
+    'figure.dpi': 600,
+    'savefig.dpi': 600,
     'savefig.bbox': 'tight',
     'savefig.pad_inches': 0.1
 })
@@ -43,6 +44,22 @@ if 'experimental_data' not in st.session_state:
     st.session_state.experimental_data = None
 if 'fit_results' not in st.session_state:
     st.session_state.fit_results = None
+if 'plot_style' not in st.session_state:
+    st.session_state.plot_style = {
+        'point_color': '#1f77b4',
+        'point_alpha': 0.8,
+        'model_line_color': 'black',
+        'thermal_line_color': 'blue',
+        'chemical_line_color': 'red',
+        'tec_exp_color': 'blue',
+        'tec_model_color': 'red',
+        'oh_color': 'green',
+        'bar_thermal_color': 'blue',
+        'bar_chemical_color': 'red',
+        'cmap_style': 'viridis',
+        'point_size': 50,
+        'line_width': 2
+    }
 
 def parse_data(data_string):
     """Parse data with various separators"""
@@ -204,7 +221,26 @@ def fit_model(data, fixed_params, initial_guess):
         st.error(f"Fitting error: {str(e)}")
         return None
 
-def create_plot1(fit_results, point_color='#1f77b4'):
+def adjust_color_brightness(color, factor=0.7):
+    """Adjust color brightness"""
+    import colorsys
+    try:
+        if color.startswith('#'):
+            color = color.lstrip('#')
+            r, g, b = tuple(int(color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+        else:
+            import matplotlib.colors as mcolors
+            r, g, b = mcolors.to_rgb(color)
+        
+        h, l, s = colorsys.rgb_to_hls(r, g, b)
+        l = max(0, min(1, l * factor))
+        r, g, b = colorsys.hls_to_rgb(h, l, s)
+        
+        return f'#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}'
+    except:
+        return color
+
+def create_plot1(fit_results, style):
     """Create plot 1: Experimental data and model with residual plot"""
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5, 6), 
                                    height_ratios=[3, 1],
@@ -216,24 +252,14 @@ def create_plot1(fit_results, point_color='#1f77b4'):
     dl_model = fit_results['dl_model']
     residuals = fit_results['residuals']
     
-    # Adjust edge color
-    import colorsys
-    if point_color.startswith('#'):
-        color = point_color.lstrip('#')
-        r, g, b = tuple(int(color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-    else:
-        import matplotlib.colors as mcolors
-        r, g, b = mcolors.to_rgb(point_color)
+    edge_color = adjust_color_brightness(style['point_color'], 0.7)
     
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
-    l = max(0, min(1, l * 0.7))
-    r, g, b = colorsys.hls_to_rgb(h, l, s)
-    edge_color = f'#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}'
-    
-    ax1.scatter(T, dl_exp, s=50, color=point_color, 
+    # First plot model line, then experimental points
+    ax1.plot(T, dl_model, '-', color=style['model_line_color'], 
+            linewidth=style['line_width'], label='Model', zorder=3)
+    ax1.scatter(T, dl_exp, s=style['point_size'], color=style['point_color'], 
                edgecolor=edge_color, linewidth=1.5, 
-               label='Experimental', zorder=5)
-    ax1.plot(T, dl_model, 'k-', linewidth=2, label='Model', zorder=4)
+               label='Experimental', zorder=4, alpha=style['point_alpha'])
     
     ax1.set_ylabel('ΔL/L₀', fontweight='bold', fontsize=11)
     ax1.legend(loc='best')
@@ -247,9 +273,10 @@ def create_plot1(fit_results, point_color='#1f77b4'):
     ax2.set_ylabel('Residual', fontweight='bold', fontsize=11)
     ax2.grid(True, alpha=0.3, linestyle='--')
     
+    fig.set_dpi(600)
     return fig
 
-def create_plot2(fit_results):
+def create_plot2(fit_results, style):
     """Create plot 2: Model contributions"""
     fig, ax = plt.subplots(figsize=(5, 3.5))
     
@@ -259,20 +286,22 @@ def create_plot2(fit_results):
     chem_contrib = fit_results['chem_contrib']
     residue = fit_results['params']['residue']
     
-    ax.plot(T, dl_model, 'k-', linewidth=2, label='Total model')
-    ax.plot(T, thermal_contrib + residue, 'b--', linewidth=1.5, 
-            label='Thermal contribution')
-    ax.plot(T, chem_contrib + residue, 'r--', linewidth=1.5, 
-            label='Chemical contribution')
+    ax.plot(T, dl_model, '-', color=style['model_line_color'], 
+           linewidth=style['line_width'], label='Total model')
+    ax.plot(T, thermal_contrib + residue, '--', color=style['thermal_line_color'], 
+           linewidth=style['line_width'], label='Thermal contribution')
+    ax.plot(T, chem_contrib + residue, '--', color=style['chemical_line_color'], 
+           linewidth=style['line_width'], label='Chemical contribution')
     
     ax.set_xlabel('Temperature (°C)', fontweight='bold', fontsize=11)
     ax.set_ylabel('ΔL/L₀', fontweight='bold', fontsize=11)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3, linestyle='--')
     
+    fig.set_dpi(600)
     return fig
 
-def create_plot3(fit_results):
+def create_plot3(fit_results, style):
     """Create plot 3: Histograms of changes"""
     fig, ax = plt.subplots(figsize=(5, 3.5))
     
@@ -289,18 +318,19 @@ def create_plot3(fit_results):
     
     bar_width = (T[1] - T[0]) * 0.7 if len(T) > 1 else 10
     ax.bar(T - bar_width/2, thermal_changes, width=bar_width, 
-           color='blue', alpha=0.7, label='Δ Thermal')
+           color=style['bar_thermal_color'], alpha=0.7, label='Δ Thermal')
     ax.bar(T + bar_width/2, chem_changes, width=bar_width, 
-           color='red', alpha=0.7, label='Δ Chemical')
+           color=style['bar_chemical_color'], alpha=0.7, label='Δ Chemical')
     
     ax.set_xlabel('Temperature (°C)', fontweight='bold', fontsize=11)
     ax.set_ylabel('Change in ΔL/L₀', fontweight='bold', fontsize=11)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3, linestyle='--', axis='y')
     
+    fig.set_dpi(600)
     return fig
 
-def create_plot4(fit_results):
+def create_plot4(fit_results, style):
     """Create plot 4: TEC and Proton concentration"""
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5, 6), 
                                    height_ratios=[3, 1],
@@ -310,24 +340,36 @@ def create_plot4(fit_results):
     T = fit_results['T_data']
     
     # TEC plot
-    ax1.plot(T, fit_results['tec_exp']*1e6, 'o-', color='blue', 
-            linewidth=1.5, markersize=4, label='Experimental TEC', alpha=0.7)
-    ax1.plot(T, fit_results['tec_model']*1e6, 'r-', linewidth=2, 
-            label='Model TEC')
+    ax1.plot(T, fit_results['tec_exp']*1e6, 'o-', color=style['tec_exp_color'], 
+            linewidth=style['line_width']-0.5, markersize=4, alpha=0.7)
+    ax1.plot(T, fit_results['tec_model']*1e6, '-', color=style['tec_model_color'], 
+            linewidth=style['line_width'])
+    ax1_right = ax1.twinx()
+    ax1_right.plot(T, fit_results['oh_concentration'], '--', color=style['oh_color'], 
+                  linewidth=style['line_width'])
     
     ax1.set_ylabel('TEC (10⁻⁶ K⁻¹)', fontweight='bold', fontsize=11, color='black')
     ax1.tick_params(axis='y', labelcolor='black')
-    ax1.legend(loc='upper left')
     ax1.grid(True, alpha=0.3, linestyle='--')
     
-    # Add proton concentration on right axis
-    ax1_right = ax1.twinx()
-    ax1_right.plot(T, fit_results['oh_concentration'], 'g--', linewidth=1.5, 
-                  label='[OH] concentration')
     ax1_right.set_ylabel('[OH] (arb. units)', fontweight='bold', 
-                       fontsize=11, color='green')
-    ax1_right.tick_params(axis='y', labelcolor='green')
-    ax1_right.legend(loc='upper right')
+                       fontsize=11, color=style['oh_color'])
+    ax1_right.tick_params(axis='y', labelcolor=style['oh_color'])
+    
+    # Combine legends in one box on the right
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], marker='o', color=style['tec_exp_color'], 
+               label='Experimental TEC', markersize=6, linewidth=style['line_width']-0.5),
+        Line2D([0], [0], color=style['tec_model_color'], 
+               label='Model TEC', linewidth=style['line_width']),
+        Line2D([0], [0], color=style['oh_color'], linestyle='--',
+               label='[OH] concentration', linewidth=style['line_width'])
+    ]
+    
+    # Position legend on the right side, centered vertically
+    ax1.legend(handles=legend_elements, loc='center left', 
+              bbox_to_anchor=(1.02, 0.5), frameon=True, framealpha=0.9)
     
     # TEC residual plot
     tec_residuals = fit_results['tec_exp'] - fit_results['tec_model']
@@ -338,7 +380,107 @@ def create_plot4(fit_results):
     ax2.set_ylabel('TEC Residual\n(10⁻⁶ K⁻¹)', fontweight='bold', fontsize=11)
     ax2.grid(True, alpha=0.3, linestyle='--')
     
+    fig.set_dpi(600)
     return fig
+
+def create_plot5(fit_results, style):
+    """Create plot 5: (ΔL/Lo)exp vs (ΔL/Lo)model with temperature color scale"""
+    fig, ax = plt.subplots(figsize=(5, 3.5))
+    
+    dl_exp = fit_results['dl_data']
+    dl_model = fit_results['dl_model']
+    T = fit_results['T_data']
+    
+    # Get colormap
+    cmap = getattr(cm, style['cmap_style'])
+    norm = Normalize(vmin=T.min(), vmax=T.max())
+    
+    sc = ax.scatter(dl_model, dl_exp, c=T, cmap=cmap, norm=norm,
+                   s=style['point_size'], edgecolor='black', linewidth=0.5)
+    
+    # Add colorbar
+    cbar = fig.colorbar(sc, ax=ax)
+    cbar.set_label('Temperature (°C)', fontweight='bold', fontsize=10)
+    
+    # Add diagonal line for perfect fit
+    min_val = min(dl_exp.min(), dl_model.min())
+    max_val = max(dl_exp.max(), dl_model.max())
+    ax.plot([min_val, max_val], [min_val, max_val], 'r--', 
+           linewidth=1, alpha=0.7, label='Perfect fit')
+    
+    ax.set_xlabel('Model ΔL/L₀', fontweight='bold', fontsize=11)
+    ax.set_ylabel('Experimental ΔL/L₀', fontweight='bold', fontsize=11)
+    ax.set_title('Correlation between Model and Experiment', fontweight='bold', fontsize=12)
+    ax.legend(loc='best')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    fig.set_dpi(600)
+    return fig
+
+def create_plot6(fit_results, style):
+    """Create plot 6: α_exp vs α_model with temperature color scale"""
+    fig, ax = plt.subplots(figsize=(5, 3.5))
+    
+    tec_exp = fit_results['tec_exp'] * 1e6  # Convert to 10⁻⁶ K⁻¹
+    tec_model = fit_results['tec_model'] * 1e6
+    T = fit_results['T_data']
+    
+    # Get colormap
+    cmap = getattr(cm, style['cmap_style'])
+    norm = Normalize(vmin=T.min(), vmax=T.max())
+    
+    sc = ax.scatter(tec_model, tec_exp, c=T, cmap=cmap, norm=norm,
+                   s=style['point_size'], edgecolor='black', linewidth=0.5)
+    
+    # Add colorbar
+    cbar = fig.colorbar(sc, ax=ax)
+    cbar.set_label('Temperature (°C)', fontweight='bold', fontsize=10)
+    
+    # Add diagonal line for perfect fit
+    min_val = min(tec_exp.min(), tec_model.min())
+    max_val = max(tec_exp.max(), tec_model.max())
+    ax.plot([min_val, max_val], [min_val, max_val], 'r--', 
+           linewidth=1, alpha=0.7, label='Perfect fit')
+    
+    ax.set_xlabel('Model TEC (10⁻⁶ K⁻¹)', fontweight='bold', fontsize=11)
+    ax.set_ylabel('Experimental TEC (10⁻⁶ K⁻¹)', fontweight='bold', fontsize=11)
+    ax.set_title('Correlation between Model and Experimental TEC', 
+                fontweight='bold', fontsize=12)
+    ax.legend(loc='best')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    fig.set_dpi(600)
+    return fig
+
+def get_metric_explanation():
+    """Return explanations for the fitting metrics"""
+    explanations = {
+        'MSE': {
+            'title': 'Mean Squared Error (MSE)',
+            'formula': r'$\text{MSE} = \frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2$',
+            'explanation': 'Measures the average squared difference between experimental and model values. Lower values indicate better fit.',
+            'units': '(ΔL/L₀)²'
+        },
+        'RMSE': {
+            'title': 'Root Mean Squared Error (RMSE)',
+            'formula': r'$\text{RMSE} = \sqrt{\frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2}$',
+            'explanation': 'Square root of MSE, provides error in the same units as the measured quantity. More interpretable than MSE.',
+            'units': 'ΔL/L₀'
+        },
+        'R²': {
+            'title': 'Coefficient of Determination (R²)',
+            'formula': r'$R^2 = 1 - \frac{\sum (y_i - \hat{y}_i)^2}{\sum (y_i - \bar{y})^2}$',
+            'explanation': 'Represents the proportion of variance in the experimental data explained by the model. Ranges from 0 to 1, with 1 indicating perfect fit.',
+            'units': 'dimensionless'
+        },
+        'χ²': {
+            'title': 'Chi-Squared Statistic (χ²)',
+            'formula': r'$\chi^2 = \sum_{i=1}^{n} \frac{(y_i - \hat{y}_i)^2}{\sigma_i^2}$',
+            'explanation': 'Weighted sum of squared residuals. Useful when measurement errors are known. Lower values indicate better fit assuming correct error estimates.',
+            'units': 'dimensionless'
+        }
+    }
+    return explanations
 
 # Main app
 st.title("📈 Thermo-Mechanical Expansion Modeling")
@@ -422,7 +564,76 @@ with st.sidebar:
     st.divider()
     
     st.header("Plot Settings")
-    point_color = st.color_picker("Point color", "#1f77b4")
+    
+    # Color settings
+    col1, col2 = st.columns(2)
+    with col1:
+        st.session_state.plot_style['point_color'] = st.color_picker(
+            "Point color", 
+            st.session_state.plot_style['point_color']
+        )
+        st.session_state.plot_style['point_alpha'] = st.slider(
+            "Point transparency", 
+            0.1, 1.0, 
+            st.session_state.plot_style['point_alpha']
+        )
+        st.session_state.plot_style['model_line_color'] = st.color_picker(
+            "Model line color", 
+            st.session_state.plot_style['model_line_color']
+        )
+        st.session_state.plot_style['thermal_line_color'] = st.color_picker(
+            "Thermal line color", 
+            st.session_state.plot_style['thermal_line_color']
+        )
+        st.session_state.plot_style['chemical_line_color'] = st.color_picker(
+            "Chemical line color", 
+            st.session_state.plot_style['chemical_line_color']
+        )
+    
+    with col2:
+        st.session_state.plot_style['tec_exp_color'] = st.color_picker(
+            "Exp. TEC color", 
+            st.session_state.plot_style['tec_exp_color']
+        )
+        st.session_state.plot_style['tec_model_color'] = st.color_picker(
+            "Model TEC color", 
+            st.session_state.plot_style['tec_model_color']
+        )
+        st.session_state.plot_style['oh_color'] = st.color_picker(
+            "[OH] line color", 
+            st.session_state.plot_style['oh_color']
+        )
+        st.session_state.plot_style['bar_thermal_color'] = st.color_picker(
+            "Thermal bar color", 
+            st.session_state.plot_style['bar_thermal_color']
+        )
+        st.session_state.plot_style['bar_chemical_color'] = st.color_picker(
+            "Chemical bar color", 
+            st.session_state.plot_style['bar_chemical_color']
+        )
+    
+    # Additional plot settings
+    col1, col2 = st.columns(2)
+    with col1:
+        st.session_state.plot_style['point_size'] = st.slider(
+            "Point size", 
+            10, 100, 
+            st.session_state.plot_style['point_size']
+        )
+        st.session_state.plot_style['line_width'] = st.slider(
+            "Line width", 
+            1.0, 5.0, 
+            st.session_state.plot_style['line_width']
+        )
+    
+    with col2:
+        cmap_options = ['viridis', 'plasma', 'inferno', 'magma', 'cividis', 
+                       'coolwarm', 'RdYlBu', 'Spectral', 'rainbow', 'jet']
+        st.session_state.plot_style['cmap_style'] = st.selectbox(
+            "Temperature colormap", 
+            cmap_options, 
+            index=cmap_options.index(st.session_state.plot_style['cmap_style'])
+        )
     
     st.divider()
     
@@ -482,17 +693,21 @@ if st.session_state.experimental_data is not None:
     
     # Quick plot of raw data
     fig_raw, ax_raw = plt.subplots(figsize=(6, 3))
-    ax_raw.scatter(df['Temperature (°C)'], df['ΔL/L₀'], s=40, color='blue', edgecolor='black')
+    ax_raw.scatter(df['Temperature (°C)'], df['ΔL/L₀'], s=40, 
+                  color=st.session_state.plot_style['point_color'], 
+                  edgecolor='black',
+                  alpha=st.session_state.plot_style['point_alpha'])
     ax_raw.set_xlabel('Temperature (°C)', fontweight='bold')
     ax_raw.set_ylabel('ΔL/L₀', fontweight='bold')
     ax_raw.set_title('Raw Experimental Data', fontweight='bold')
     ax_raw.grid(True, alpha=0.3)
+    fig_raw.set_dpi(600)
     st.pyplot(fig_raw)
 
 if st.session_state.fit_results is not None:
     st.header("Fitting Results")
     
-    # Display metrics
+    # Display metrics with expandable explanations
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("MSE", f"{st.session_state.fit_results['mse']:.3e}")
@@ -502,6 +717,16 @@ if st.session_state.fit_results is not None:
         st.metric("R²", f"{st.session_state.fit_results['r2']:.6f}")
     with col4:
         st.metric("χ²", f"{st.session_state.fit_results['chi2']:.6f}")
+    
+    # Metric explanations
+    with st.expander("📊 Metric Explanations (for scientific paper)"):
+        explanations = get_metric_explanation()
+        for metric, info in explanations.items():
+            st.markdown(f"**{info['title']}**")
+            st.latex(info['formula'])
+            st.markdown(f"*{info['explanation']}*")
+            st.markdown(f"**Units:** {info['units']}")
+            st.markdown("---")
     
     # Display parameters
     st.subheader("Model Parameters")
@@ -520,19 +745,25 @@ if st.session_state.fit_results is not None:
     st.header("Plots")
     
     # Create all plots
-    plot1 = create_plot1(st.session_state.fit_results, point_color)
-    plot2 = create_plot2(st.session_state.fit_results)
-    plot3 = create_plot3(st.session_state.fit_results)
-    plot4 = create_plot4(st.session_state.fit_results)
+    plot1 = create_plot1(st.session_state.fit_results, st.session_state.plot_style)
+    plot2 = create_plot2(st.session_state.fit_results, st.session_state.plot_style)
+    plot3 = create_plot3(st.session_state.fit_results, st.session_state.plot_style)
+    plot4 = create_plot4(st.session_state.fit_results, st.session_state.plot_style)
+    plot5 = create_plot5(st.session_state.fit_results, st.session_state.plot_style)
+    plot6 = create_plot6(st.session_state.fit_results, st.session_state.plot_style)
     
     # Display plots in columns
     col1, col2 = st.columns(2)
+    
     with col1:
         st.subheader("Experimental Data and Model")
         st.pyplot(plot1)
         
         st.subheader("Histograms of Changes")
         st.pyplot(plot3)
+        
+        st.subheader("ΔL/L₀: Model vs Experiment")
+        st.pyplot(plot5)
     
     with col2:
         st.subheader("Model Contributions")
@@ -540,15 +771,88 @@ if st.session_state.fit_results is not None:
         
         st.subheader("TEC and Proton Concentration")
         st.pyplot(plot4)
+        
+        st.subheader("TEC: Model vs Experiment")
+        st.pyplot(plot6)
     
-    # Download results
+    # Download section for individual plots
     st.divider()
     st.subheader("Export Results")
+    
+    # Create columns for download buttons
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📥 Download Plot 1 (Data & Model)"):
+            buf = io.BytesIO()
+            plot1.savefig(buf, format='png', dpi=600)
+            st.download_button(
+                label="Download PNG (600 DPI)",
+                data=buf.getvalue(),
+                file_name="plot1_data_and_model.png",
+                mime="image/png"
+            )
+        
+        if st.button("📥 Download Plot 2 (Contributions)"):
+            buf = io.BytesIO()
+            plot2.savefig(buf, format='png', dpi=600)
+            st.download_button(
+                label="Download PNG (600 DPI)",
+                data=buf.getvalue(),
+                file_name="plot2_contributions.png",
+                mime="image/png"
+            )
+    
+    with col2:
+        if st.button("📥 Download Plot 3 (Histograms)"):
+            buf = io.BytesIO()
+            plot3.savefig(buf, format='png', dpi=600)
+            st.download_button(
+                label="Download PNG (600 DPI)",
+                data=buf.getvalue(),
+                file_name="plot3_histograms.png",
+                mime="image/png"
+            )
+        
+        if st.button("📥 Download Plot 4 (TEC & [OH])"):
+            buf = io.BytesIO()
+            plot4.savefig(buf, format='png', dpi=600)
+            st.download_button(
+                label="Download PNG (600 DPI)",
+                data=buf.getvalue(),
+                file_name="plot4_tec_and_oh.png",
+                mime="image/png"
+            )
+    
+    with col3:
+        if st.button("📥 Download Plot 5 (ΔL/L₀ Correlation)"):
+            buf = io.BytesIO()
+            plot5.savefig(buf, format='png', dpi=600)
+            st.download_button(
+                label="Download PNG (600 DPI)",
+                data=buf.getvalue(),
+                file_name="plot5_dl_correlation.png",
+                mime="image/png"
+            )
+        
+        if st.button("📥 Download Plot 6 (TEC Correlation)"):
+            buf = io.BytesIO()
+            plot6.savefig(buf, format='png', dpi=600)
+            st.download_button(
+                label="Download PNG (600 DPI)",
+                data=buf.getvalue(),
+                file_name="plot6_tec_correlation.png",
+                mime="image/png"
+            )
+    
+    # Download data
+    st.divider()
+    st.subheader("Download Data")
     
     col1, col2 = st.columns(2)
     with col1:
         # Download fitted data as CSV
-        if st.button("📥 Download Fitted Data"):
+        if st.button("📊 Download Fitted Data (CSV)"):
             fitted_df = pd.DataFrame({
                 'Temperature_C': st.session_state.fit_results['T_data'],
                 'DeltaL_L0_exp': st.session_state.fit_results['dl_data'],
@@ -568,7 +872,7 @@ if st.session_state.fit_results is not None:
     
     with col2:
         # Download parameters as text
-        if st.button("📥 Download Parameters"):
+        if st.button("⚙️ Download Parameters (TXT)"):
             params_text = f"""FITTING RESULTS
 ================
 MSE: {st.session_state.fit_results['mse']:.6e}
@@ -605,7 +909,7 @@ st.markdown("---")
 st.markdown(
     """
     <div style='text-align: center'>
-        <p>Thermo-Mechanical Expansion Modeling Tool | For scientific publications</p>
+        <p>Thermo-Mechanical Expansion Modeling Tool | For scientific publications | 600 DPI export</p>
     </div>
     """,
     unsafe_allow_html=True
