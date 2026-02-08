@@ -159,6 +159,7 @@ def model_func_cached(T: np.ndarray, Acc: float, alpha_1e6: float, beta: float,
     return dl_dl0
 
 @st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any], 
                     initial_guess: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Perform model fitting with caching"""
@@ -233,7 +234,22 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
         mse = np.mean(residuals**2)
         rmse = np.sqrt(mse)
         r2 = 1 - np.sum(residuals**2) / np.sum((dl_data - np.mean(dl_data))**2)
-        chi2 = np.sum(residuals**2) / mse if mse > 0 else 0
+        
+        # ИСПРАВЛЕННОЕ ВЫЧИСЛЕНИЕ χ²:
+        # Для моделей регрессии без известных погрешностей измерений используется:
+        # χ²_red = Σ(y_i - ŷ_i)² / (N - p)
+        # где N - количество точек данных, p - количество свободных параметров
+        N = len(dl_data)
+        p = len(vary_params)  # количество подгоняемых параметров
+        
+        if N > p:
+            chi2 = np.sum(residuals**2) / (N - p)  # приведенный χ²
+        else:
+            chi2 = np.nan  # недостаточно данных
+        
+        # Альтернативно, если хотите классический χ²:
+        # Предполагаем одинаковые погрешности σ = rmse
+        # chi2 = np.sum(residuals**2) / (rmse**2) if rmse > 0 else np.nan
         
         # Calculate TEC for both experimental and model data
         tec_exp = calculate_tec_cached(T_data, dl_data)
@@ -257,6 +273,9 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
             'rmse': rmse,
             'r2': r2,
             'chi2': chi2,
+            'reduced_chi2': chi2,  # добавим для ясности
+            'N_points': N,
+            'n_free_params': p,
             'T_start': T_start,
             'oh_start': oh_start,
             'vary_params': vary_params,
@@ -520,9 +539,9 @@ def get_metric_explanation() -> Dict[str, Dict[str, str]]:
             'units': 'dimensionless'
         },
         'χ²': {
-            'title': 'Chi-Squared Statistic (χ²)',
-            'formula': r'$\chi^2 = \sum_{i=1}^{n} \frac{(y_i - \hat{y}_i)^2}{\sigma_i^2}$',
-            'explanation': 'Weighted sum of squared residuals. Useful when measurement errors are known. Lower values indicate better fit assuming correct error estimates.',
+            'title': 'Reduced Chi-Squared Statistic (χ²_red)',
+            'formula': r'$\chi^2_{\text{red}} = \frac{1}{n-p} \sum_{i=1}^{n} \frac{(y_i - \hat{y}_i)^2}{\sigma_i^2}$',
+            'explanation': 'For regression without known measurement errors, we assume σ = 1. This normalized metric accounts for degrees of freedom. Values close to 1 indicate good fit.',
             'units': 'dimensionless'
         }
     }
@@ -918,7 +937,9 @@ def main():
         with col3:
             st.metric("R²", f"{st.session_state.fit_results['r2']:.6f}")
         with col4:
-            st.metric("χ²", f"{st.session_state.fit_results['chi2']:.6f}")
+            chi2_value = st.session_state.fit_results['chi2']
+            chi2_label = "χ²_red" if not np.isnan(chi2_value) else "χ²"
+            st.metric(chi2_label, f"{chi2_value:.6f}")
         
         # Metric explanations
         with st.expander("📊 Metric Explanations (for scientific paper)"):
@@ -1149,4 +1170,5 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 
 if __name__ == "__main__":
     main()
+
 
