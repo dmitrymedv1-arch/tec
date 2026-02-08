@@ -369,7 +369,7 @@ def create_plot4(fit_results, style):
     
     # Position legend on the right side, centered vertically
     ax1.legend(handles=legend_elements, loc='center left', 
-              bbox_to_anchor=(0.8, 0.5), frameon=True, framealpha=0.9)
+              bbox_to_anchor=(0.6, 0.5), frameon=True, framealpha=0.9)
     
     # TEC residual plot
     tec_residuals = fit_results['tec_exp'] - fit_results['tec_model']
@@ -916,6 +916,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
