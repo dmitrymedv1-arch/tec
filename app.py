@@ -9,6 +9,9 @@ import matplotlib.cm as cm
 from matplotlib.colors import Normalize
 from typing import Dict, Any, Optional, Tuple
 import time
+from scipy.stats import norm, probplot
+from statsmodels.graphics.tsaplots import plot_acf
+import warnings
 warnings.filterwarnings('ignore')
 
 # ============================================
@@ -537,6 +540,423 @@ def create_plot6_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     fig.set_dpi(600)
     return fig
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot7_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Create plot 7: Долевой вклад теплового и химического компонентов (cached)"""
+    T = fit_results['T_data']
+    thermal = fit_results['thermal_contrib']
+    chemical = fit_results['chem_contrib']
+    residue = fit_results['params']['residue']
+    
+    # Абсолютные значения с учётом residue
+    thermal_abs = thermal + residue
+    chemical_abs = chemical - chemical[-1]  # химический вклад с нулём в конце
+    
+    # Процентные вклады (по абсолютным значениям)
+    thermal_percent = np.abs(thermal_abs) / (np.abs(thermal_abs) + np.abs(chemical_abs)) * 100
+    chemical_percent = np.abs(chemical_abs) / (np.abs(thermal_abs) + np.abs(chemical_abs)) * 100
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5, 6), sharex=True)
+    fig.subplots_adjust(hspace=0.1)
+    
+    # Абсолютные значения
+    ax1.plot(T, thermal_abs, '-', color=style['thermal_line_color'], 
+            linewidth=style['line_width'], label='Thermal contribution')
+    ax1.plot(T, chemical_abs, '-', color=style['chemical_line_color'], 
+            linewidth=style['line_width'], label='Chemical contribution')
+    ax1.set_ylabel('Absolute Contribution', fontweight='bold', fontsize=11)
+    ax1.legend(loc='best')
+    ax1.grid(True, alpha=0.3, linestyle='--')
+    
+    # Процентные доли
+    ax2.stackplot(T, [thermal_percent, chemical_percent], 
+                  colors=[style['thermal_line_color'], style['chemical_line_color']],
+                  labels=['Thermal %', 'Chemical %'], alpha=0.7)
+    ax2.set_xlabel('Temperature (°C)', fontweight='bold', fontsize=11)
+    ax2.set_ylabel('Relative Contribution (%)', fontweight='bold', fontsize=11)
+    ax2.legend(loc='upper left')
+    ax2.grid(True, alpha=0.3, linestyle='--')
+    ax2.set_ylim(0, 100)
+    
+    # Добавим аннотацию о максимальных вкладах
+    max_thermal_temp = T[np.argmax(thermal_percent)]
+    max_chemical_temp = T[np.argmax(chemical_percent)]
+    
+    ax2.text(0.02, 0.98, f'Max thermal: {max_thermal_temp:.1f}°C', 
+             transform=ax2.transAxes, ha='left', va='top',
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    ax2.text(0.02, 0.90, f'Max chemical: {max_chemical_temp:.1f}°C', 
+             transform=ax2.transAxes, ha='left', va='top',
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot8_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Create plot 8: Чувствительность модели к вариациям ключевых параметров (cached)"""
+    T = fit_results['T_data']
+    base_dl = fit_results['dl_model']
+    params = fit_results['params']
+    T_start = fit_results['T_start']
+    oh_start = fit_results['oh_start']
+    
+    fig, axes = plt.subplots(2, 2, figsize=(8, 6))
+    axes = axes.flatten()
+    
+    # Вариация α (±10%, ±5%, 0%, +5%, +10%)
+    variations = [-0.10, -0.05, 0, 0.05, 0.10]
+    for var in variations:
+        alpha_var = params['alpha_1e6'] * (1 + var)
+        dl_var = model_func_cached(T, params['Acc'], alpha_var, params['beta'],
+                                  params['dH'], params['dS'], params['pH2O'], 
+                                  params['residue'], T_start, oh_start)
+        axes[0].plot(T, (dl_var - base_dl)*1e6, label=f'{var*100:+}%', linewidth=1.5)
+    axes[0].set_title('Sensitivity to α (CTE)', fontweight='bold', fontsize=11)
+    axes[0].set_ylabel('Δ(ΔL/L₀) (10⁻⁶)', fontweight='bold', fontsize=10)
+    axes[0].grid(True, alpha=0.3, linestyle='--')
+    axes[0].legend(title='α variation', fontsize=8, title_fontsize=9)
+    
+    # Вариация β (±10%, ±5%, 0%, +5%, +10%)
+    for var in variations:
+        beta_var = params['beta'] * (1 + var)
+        dl_var = model_func_cached(T, params['Acc'], params['alpha_1e6'], beta_var,
+                                  params['dH'], params['dS'], params['pH2O'], 
+                                  params['residue'], T_start, oh_start)
+        axes[1].plot(T, (dl_var - base_dl)*1e6, label=f'{var*100:+}%', linewidth=1.5)
+    axes[1].set_title('Sensitivity to β (chemical coeff.)', fontweight='bold', fontsize=11)
+    axes[1].set_ylabel('Δ(ΔL/L₀) (10⁻⁶)', fontweight='bold', fontsize=10)
+    axes[1].grid(True, alpha=0.3, linestyle='--')
+    axes[1].legend(title='β variation', fontsize=8, title_fontsize=9)
+    
+    # Вариация ΔH (±5, ±2, 0, +2, +5 кДж/моль)
+    dH_variations = [-5, -2, 0, 2, 5]
+    for var in dH_variations:
+        dH_var = params['dH'] + var
+        dl_var = model_func_cached(T, params['Acc'], params['alpha_1e6'], params['beta'],
+                                  dH_var, params['dS'], params['pH2O'], 
+                                  params['residue'], T_start, oh_start)
+        axes[2].plot(T, (dl_var - base_dl)*1e6, label=f'{var:+} kJ/mol', linewidth=1.5)
+    axes[2].set_title('Sensitivity to ΔH', fontweight='bold', fontsize=11)
+    axes[2].set_xlabel('Temperature (°C)', fontweight='bold', fontsize=10)
+    axes[2].set_ylabel('Δ(ΔL/L₀) (10⁻⁶)', fontweight='bold', fontsize=10)
+    axes[2].grid(True, alpha=0.3, linestyle='--')
+    axes[2].legend(title='ΔH shift', fontsize=8, title_fontsize=9)
+    
+    # Вариация pH₂O (логарифмическая шкала)
+    pH2O_variations = [-0.5, -0.2, 0, 0.2, 0.5]  # множители 10^var
+    for var in pH2O_variations:
+        pH2O_var = params['pH2O'] * 10**var
+        dl_var = model_func_cached(T, params['Acc'], params['alpha_1e6'], params['beta'],
+                                  params['dH'], params['dS'], pH2O_var, 
+                                  params['residue'], T_start, oh_start)
+        axes[3].plot(T, (dl_var - base_dl)*1e6, label=f'×{10**var:.1f}', linewidth=1.5)
+    axes[3].set_title('Sensitivity to pH₂O', fontweight='bold', fontsize=11)
+    axes[3].set_xlabel('Temperature (°C)', fontweight='bold', fontsize=10)
+    axes[3].set_ylabel('Δ(ΔL/L₀) (10⁻⁶)', fontweight='bold', fontsize=10)
+    axes[3].grid(True, alpha=0.3, linestyle='--')
+    axes[3].legend(title='pH₂O factor', fontsize=8, title_fontsize=9)
+    
+    plt.tight_layout()
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot9_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Create plot 9: Фазовый портрет системы (cached)"""
+    T = fit_results['T_data']
+    dl = fit_results['dl_data']
+    dl_model = fit_results['dl_model']
+    
+    # Первые производные (TEC)
+    dldT_exp = np.gradient(dl, T)
+    dldT_model = np.gradient(dl_model, T)
+    
+    # Вторые производные (кривизна)
+    d2ldT2_exp = np.gradient(dldT_exp, T)
+    d2ldT2_model = np.gradient(dldT_model, T)
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+    
+    # Фазовый портрет 1: dl vs dldT
+    sc1 = ax1.scatter(dl[1:-1], dldT_exp[1:-1]*1e6, c=T[1:-1], 
+                     cmap=style['cmap_style'], s=50, edgecolor='none', alpha=0.8)
+    ax1.plot(dl_model, dldT_model*1e6, 'k-', linewidth=2, alpha=0.7, label='Model trajectory')
+    ax1.set_xlabel('ΔL/L₀', fontweight='bold', fontsize=11)
+    ax1.set_ylabel('d(ΔL/L₀)/dT (10⁻⁶ K⁻¹)', fontweight='bold', fontsize=11)
+    ax1.set_title('Phase Portrait: Position vs Velocity', fontweight='bold', fontsize=12)
+    ax1.legend(loc='best')
+    ax1.grid(True, alpha=0.3, linestyle='--')
+    cbar1 = plt.colorbar(sc1, ax=ax1)
+    cbar1.set_label('Temperature (°C)', fontweight='bold', fontsize=10)
+    
+    # Фазовый портрет 2: dldT vs d2ldT2
+    sc2 = ax2.scatter(dldT_exp[2:-2]*1e6, d2ldT2_exp[2:-2]*1e9, c=T[2:-2], 
+                     cmap=style['cmap_style'], s=50, edgecolor='none', alpha=0.8)
+    ax2.plot(dldT_model*1e6, d2ldT2_model*1e9, 'k-', linewidth=2, alpha=0.7, label='Model trajectory')
+    ax2.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
+    ax2.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+    ax2.set_xlabel('d(ΔL/L₀)/dT (10⁻⁶ K⁻¹)', fontweight='bold', fontsize=11)
+    ax2.set_ylabel('d²(ΔL/L₀)/dT² (10⁻⁹ K⁻²)', fontweight='bold', fontsize=11)
+    ax2.set_title('Phase Portrait: Velocity vs Acceleration', fontweight='bold', fontsize=12)
+    ax2.legend(loc='best')
+    ax2.grid(True, alpha=0.3, linestyle='--')
+    cbar2 = plt.colorbar(sc2, ax=ax2)
+    cbar2.set_label('Temperature (°C)', fontweight='bold', fontsize=10)
+    
+    plt.tight_layout()
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot10_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Create plot 10: Статистический анализ остатков (cached)"""
+    residuals = fit_results['residuals']
+    T = fit_results['T_data']
+    dl_model = fit_results['dl_model']
+    
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 8))
+    
+    # Гистограмма остатков
+    n_bins = min(15, len(residuals)//5)
+    if n_bins < 5:
+        n_bins = 5
+    
+    ax1.hist(residuals, bins=n_bins, density=True, alpha=0.7, 
+            color=style['point_color'], edgecolor='black')
+    
+    mu, std = norm.fit(residuals)
+    x = np.linspace(residuals.min(), residuals.max(), 100)
+    ax1.plot(x, norm.pdf(x, mu, std), 'r-', linewidth=2, 
+            label=f'Normal fit\nμ={mu:.2e}\nσ={std:.2e}')
+    ax1.set_xlabel('Residuals', fontweight='bold', fontsize=11)
+    ax1.set_ylabel('Density', fontweight='bold', fontsize=11)
+    ax1.set_title('Distribution of Residuals', fontweight='bold', fontsize=12)
+    ax1.legend(loc='best')
+    ax1.grid(True, alpha=0.3, linestyle='--')
+    
+    # QQ-plot
+    probplot(residuals, dist="norm", plot=ax2)
+    ax2.get_lines()[0].set_marker('o')
+    ax2.get_lines()[0].set_markersize(4)
+    ax2.get_lines()[0].set_markerfacecolor(style['point_color'])
+    ax2.get_lines()[0].set_markeredgecolor(style['point_color'])
+    ax2.get_lines()[0].set_alpha(0.7)
+    ax2.get_lines()[1].set_color('red')
+    ax2.get_lines()[1].set_linewidth(2)
+    ax2.set_title('Q-Q Plot (Normality Test)', fontweight='bold', fontsize=12)
+    ax2.grid(True, alpha=0.3, linestyle='--')
+    ax2.set_xlabel('Theoretical Quantiles', fontweight='bold', fontsize=11)
+    ax2.set_ylabel('Sample Quantiles', fontweight='bold', fontsize=11)
+    
+    # Автокорреляция остатков
+    max_lags = min(20, len(residuals)//2)
+    if max_lags >= 5:
+        plot_acf(residuals, lags=max_lags, ax=ax3, 
+                alpha=0.05, title='Autocorrelation of Residuals',
+                marker='o', markersize=4,
+                markerfacecolor=style['point_color'],
+                markeredgecolor=style['point_color'])
+    else:
+        ax3.text(0.5, 0.5, 'Insufficient data\nfor autocorrelation',
+                ha='center', va='center', transform=ax3.transAxes,
+                fontweight='bold')
+        ax3.set_title('Autocorrelation of Residuals', fontweight='bold', fontsize=12)
+    ax3.set_xlabel('Lag', fontweight='bold', fontsize=11)
+    ax3.set_ylabel('Autocorrelation', fontweight='bold', fontsize=11)
+    ax3.grid(True, alpha=0.3, linestyle='--')
+    
+    # Остатки vs предсказанные значения
+    ax4.scatter(dl_model, residuals, s=30, alpha=0.7, 
+               color=style['point_color'], edgecolor='none')
+    ax4.axhline(y=0, color='red', linestyle='--', alpha=0.7, linewidth=1.5)
+    ax4.set_xlabel('Predicted ΔL/L₀', fontweight='bold', fontsize=11)
+    ax4.set_ylabel('Residuals', fontweight='bold', fontsize=11)
+    ax4.set_title('Residuals vs Fitted Values', fontweight='bold', fontsize=12)
+    ax4.grid(True, alpha=0.3, linestyle='--')
+    
+    # Добавить линии ±2σ и ±3σ
+    ax4.axhline(y=2*std, color='gray', linestyle=':', alpha=0.5, linewidth=1)
+    ax4.axhline(y=-2*std, color='gray', linestyle=':', alpha=0.5, linewidth=1)
+    ax4.axhline(y=3*std, color='gray', linestyle=':', alpha=0.3, linewidth=0.8)
+    ax4.axhline(y=-3*std, color='gray', linestyle=':', alpha=0.3, linewidth=0.8)
+    
+    ax4.text(0.05, 0.95, f'±2σ = ±{2*abs(std):.2e}\n±3σ = ±{3*abs(std):.2e}', 
+             transform=ax4.transAxes, va='top', ha='left', fontsize=9, 
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot11_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Create plot 11: Динамика концентрации OH и её температурных производных (cached)"""
+    T = fit_results['T_data']
+    oh = fit_results['oh_concentration']
+    
+    # Производные [OH] по температуре
+    dohdT = np.gradient(oh, T) * 1e3  # в 10⁻³ K⁻¹
+    d2ohdT2 = np.gradient(dohdT, T)
+    
+    # d(ln[OH])/dT = (1/[OH]) * d[OH]/dT
+    # Избегаем деления на ноль или очень маленькие значения
+    oh_safe = oh.copy()
+    oh_safe[oh_safe < 1e-10] = 1e-10
+    dlnohdT = dohdT / oh_safe * 1e-3  # масштабируем обратно
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8), sharex=True)
+    fig.subplots_adjust(hspace=0.1)
+    
+    # Концентрация и первая производная
+    ax1.plot(T, oh, '-', color=style['oh_color'], linewidth=2, label='[OH] concentration')
+    ax1.set_ylabel('[OH] (arb. units)', color=style['oh_color'], fontweight='bold', fontsize=11)
+    ax1.tick_params(axis='y', labelcolor=style['oh_color'])
+    ax1.legend(loc='upper left')
+    ax1.grid(True, alpha=0.3, linestyle='--')
+    
+    ax1_r = ax1.twinx()
+    ax1_r.plot(T, dohdT, '--', color='purple', linewidth=1.5, 
+              label="d[OH]/dT (10⁻³ K⁻¹)")
+    ax1_r.set_ylabel('d[OH]/dT (10⁻³ K⁻¹)', color='purple', fontweight='bold', fontsize=11)
+    ax1_r.tick_params(axis='y', labelcolor='purple')
+    ax1_r.legend(loc='upper right')
+    ax1_r.grid(True, alpha=0.3, linestyle='--')
+    
+    ax1.set_title('OH Concentration Dynamics', fontweight='bold', fontsize=12)
+    
+    # Вторая производная и коэффициент экспоненты
+    ax2.plot(T, d2ohdT2, '-', color='orange', linewidth=2, 
+            label='d²[OH]/dT²', alpha=0.8)
+    ax2.set_xlabel('Temperature (°C)', fontweight='bold', fontsize=11)
+    ax2.set_ylabel('d²[OH]/dT²', fontweight='bold', fontsize=11, color='orange')
+    ax2.tick_params(axis='y', labelcolor='orange')
+    ax2.legend(loc='upper left')
+    ax2.grid(True, alpha=0.3, linestyle='--')
+    
+    ax2_r = ax2.twinx()
+    ax2_r.plot(T, dlnohdT, '--', color='green', linewidth=1.5, 
+              label='d(ln[OH])/dT', alpha=0.8)
+    ax2_r.set_ylabel('d(ln[OH])/dT (K⁻¹)', color='green', fontweight='bold', fontsize=11)
+    ax2_r.tick_params(axis='y', labelcolor='green')
+    ax2_r.legend(loc='upper right')
+    
+    # Добавим аннотации для ключевых точек
+    # Точка максимальной скорости изменения
+    max_dohdT_idx = np.argmax(np.abs(dohdT))
+    ax1.annotate(f'Max rate\n{T[max_dohdT_idx]:.1f}°C',
+                xy=(T[max_dohdT_idx], oh[max_dohdT_idx]),
+                xytext=(T[max_dohdT_idx]+5, oh[max_dohdT_idx]*0.8),
+                arrowprops=dict(arrowstyle='->', color='gray', alpha=0.7),
+                fontsize=9, ha='center')
+    
+    # Точка перегиба (где d2ohdT2 меняет знак)
+    sign_changes = np.where(np.diff(np.sign(d2ohdT2)))[0]
+    if len(sign_changes) > 0:
+        inflection_idx = sign_changes[0]
+        ax2.annotate(f'Inflection\n{T[inflection_idx]:.1f}°C',
+                    xy=(T[inflection_idx], d2ohdT2[inflection_idx]),
+                    xytext=(T[inflection_idx]+5, d2ohdT2[inflection_idx]*0.8),
+                    arrowprops=dict(arrowstyle='->', color='gray', alpha=0.7),
+                    fontsize=9, ha='center')
+    
+    plt.tight_layout()
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot12_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> Optional[plt.Figure]:
+    """Create plot 12: Корреляционная матрица параметров модели (cached)"""
+    params = fit_results['params']
+    pcov = fit_results.get('pcov', None)
+    vary_params = fit_results.get('vary_params', [])
+    
+    if pcov is None or np.all(pcov == 0) or len(vary_params) < 2:
+        # Если нет ковариационной матрицы или недостаточно параметров
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.text(0.5, 0.5, 'Covariance matrix not available\nfor correlation analysis\n(too few fitted parameters or matrix is zero)',
+                ha='center', va='center', transform=ax.transAxes,
+                fontweight='bold', fontsize=12)
+        ax.set_title('Parameter Correlation Matrix', fontweight='bold', fontsize=14)
+        ax.axis('off')
+        fig.set_dpi(600)
+        return fig
+    
+    try:
+        # Извлекаем корреляции из ковариационной матрицы
+        # Используем только подогнанные параметры
+        param_names_display = []
+        param_indices = []
+        
+        all_param_names = ['Acc', 'alpha_1e6', 'beta', 'dH', 'dS', 'pH2O', 'residue']
+        display_names = {
+            'Acc': '[Acc]',
+            'alpha_1e6': 'α·10⁶',
+            'beta': 'β',
+            'dH': 'ΔH',
+            'dS': 'ΔS',
+            'pH2O': 'pH₂O',
+            'residue': 'Residue'
+        }
+        
+        for i, name in enumerate(all_param_names):
+            if name in vary_params:
+                param_names_display.append(display_names.get(name, name))
+                param_indices.append(i)
+        
+        # Выбираем только подматрицу для подогнанных параметров
+        pcov_subset = pcov[np.ix_(param_indices, param_indices)]
+        
+        # Вычисляем корреляционную матрицу
+        std_dev = np.sqrt(np.diag(pcov_subset))
+        # Избегаем деления на ноль
+        std_dev[std_dev == 0] = 1e-10
+        corr_matrix = pcov_subset / np.outer(std_dev, std_dev)
+        
+        # Ограничиваем значения для стабильности
+        corr_matrix = np.clip(corr_matrix, -1, 1)
+        
+        fig, ax = plt.subplots(figsize=(6, 5))
+        
+        im = ax.imshow(corr_matrix, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
+        
+        # Добавляем аннотации
+        for i in range(len(param_names_display)):
+            for j in range(len(param_names_display)):
+                text_color = 'white' if abs(corr_matrix[i, j]) > 0.7 else 'black'
+                ax.text(j, i, f'{corr_matrix[i, j]:.2f}',
+                       ha="center", va="center", color=text_color, fontsize=9,
+                       fontweight='bold' if abs(corr_matrix[i, j]) > 0.8 else 'normal')
+        
+        ax.set_xticks(range(len(param_names_display)))
+        ax.set_yticks(range(len(param_names_display)))
+        ax.set_xticklabels(param_names_display, rotation=45, ha='right', fontsize=10)
+        ax.set_yticklabels(param_names_display, fontsize=10)
+        ax.set_title('Parameter Correlation Matrix', fontweight='bold', fontsize=14)
+        
+        # Добавим информацию о количестве подогнанных параметров
+        ax.text(0.02, 1.02, f'Fitted parameters: {len(vary_params)}', 
+                transform=ax.transAxes, ha='left', va='bottom', fontsize=9,
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('Correlation Coefficient', fontweight='bold', fontsize=10)
+        
+        plt.tight_layout()
+        fig.set_dpi(600)
+        return fig
+        
+    except Exception as e:
+        # Если что-то пошло не так, создаём простой график с сообщением
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.text(0.5, 0.5, f'Error creating correlation matrix:\n{str(e)[:100]}...',
+                ha='center', va='center', transform=ax.transAxes,
+                fontweight='bold', fontsize=12)
+        ax.set_title('Parameter Correlation Matrix', fontweight='bold', fontsize=14)
+        ax.axis('off')
+        fig.set_dpi(600)
+        return fig
+
 # ============================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ============================================
@@ -1013,112 +1433,293 @@ def main():
         st.divider()
         st.header("Plots")
         
-        # Create all plots with cached functions
-        plot1 = create_plot1_cached(st.session_state.fit_results, st.session_state.plot_style)
-        plot2 = create_plot2_cached(st.session_state.fit_results, st.session_state.plot_style)
-        plot3 = create_plot3_cached(st.session_state.fit_results, st.session_state.plot_style)
-        plot4 = create_plot4_cached(st.session_state.fit_results, st.session_state.plot_style)
-        plot5 = create_plot5_cached(st.session_state.fit_results, st.session_state.plot_style)
-        plot6 = create_plot6_cached(st.session_state.fit_results, st.session_state.plot_style)
+        # Создаём вкладки для лучшей организации множества графиков
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📈 Basic Plots", 
+            "🔍 Advanced Analysis", 
+            "📊 Statistical Analysis", 
+            "🧪 Model Insights"
+        ])
         
-        # Display plots in columns
-        col1, col2 = st.columns(2)
+        with tab1:
+            st.subheader("Basic Analysis Plots")
+            
+            # Create basic plots
+            plot1 = create_plot1_cached(st.session_state.fit_results, st.session_state.plot_style)
+            plot2 = create_plot2_cached(st.session_state.fit_results, st.session_state.plot_style)
+            plot3 = create_plot3_cached(st.session_state.fit_results, st.session_state.plot_style)
+            plot4 = create_plot4_cached(st.session_state.fit_results, st.session_state.plot_style)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Experimental Data and Model**")
+                st.pyplot(plot1)
+                
+                st.markdown("**Histograms of Changes**")
+                st.pyplot(plot3)
+            
+            with col2:
+                st.markdown("**Model Contributions**")
+                st.pyplot(plot2)
+                
+                st.markdown("**TEC and Proton Concentration**")
+                st.pyplot(plot4)
         
-        with col1:
-            st.subheader("Experimental Data and Model")
-            st.pyplot(plot1)
+        with tab2:
+            st.subheader("Advanced Analysis Plots")
             
-            st.subheader("Histograms of Changes")
-            st.pyplot(plot3)
+            # Create correlation plots
+            plot5 = create_plot5_cached(st.session_state.fit_results, st.session_state.plot_style)
+            plot6 = create_plot6_cached(st.session_state.fit_results, st.session_state.plot_style)
+            plot9 = create_plot9_cached(st.session_state.fit_results, st.session_state.plot_style)
             
-            st.subheader("ΔL/L₀: Model vs Experiment")
-            st.pyplot(plot5)
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**ΔL/L₀: Model vs Experiment**")
+                st.pyplot(plot5)
+                
+                st.markdown("**TEC: Model vs Experiment**")
+                st.pyplot(plot6)
+            
+            with col2:
+                st.markdown("**Phase Portrait Analysis**")
+                st.pyplot(plot9)
+                
+                st.info("""
+                **Phase Portrait Insights:**
+                - **Left plot**: Shows how the rate of expansion (velocity) changes with expansion itself (position)
+                - **Right plot**: Shows acceleration (rate of change of velocity) vs velocity
+                - The model trajectory (black line) shows the predicted path through phase space
+                - Deviations from the trajectory indicate regions where the model doesn't fully capture the dynamics
+                """)
         
-        with col2:
-            st.subheader("Model Contributions")
-            st.pyplot(plot2)
+        with tab3:
+            st.subheader("Statistical Analysis Plots")
             
-            st.subheader("TEC and Proton Concentration")
-            st.pyplot(plot4)
+            # Create statistical plots
+            plot10 = create_plot10_cached(st.session_state.fit_results, st.session_state.plot_style)
+            plot12 = create_plot12_cached(st.session_state.fit_results, st.session_state.plot_style)
             
-            st.subheader("TEC: Model vs Experiment")
-            st.pyplot(plot6)
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Residual Analysis**")
+                st.pyplot(plot10)
+                
+                st.info("""
+                **Statistical Diagnostics:**
+                - **Top-left**: Histogram of residuals with normal distribution fit
+                - **Top-right**: Q-Q plot for normality testing (points should follow red line)
+                - **Bottom-left**: Autocorrelation of residuals (should be within blue bands for independence)
+                - **Bottom-right**: Residuals vs fitted values (should be randomly scattered)
+                """)
+            
+            with col2:
+                st.markdown("**Parameter Correlations**")
+                st.pyplot(plot12)
+                
+                st.info("""
+                **Correlation Matrix Insights:**
+                - Shows correlations between fitted parameters
+                - Values close to ±1 indicate strong (anti-)correlation
+                - High correlations may indicate identifiability issues
+                - Ideally, parameters should be relatively independent (values near 0)
+                """)
+        
+        with tab4:
+            st.subheader("Model Insights Plots")
+            
+            # Create insight plots
+            plot7 = create_plot7_cached(st.session_state.fit_results, st.session_state.plot_style)
+            plot8 = create_plot8_cached(st.session_state.fit_results, st.session_state.plot_style)
+            plot11 = create_plot11_cached(st.session_state.fit_results, st.session_state.plot_style)
+            
+            st.markdown("**Contribution Analysis**")
+            st.pyplot(plot7)
+            
+            st.markdown("**Parameter Sensitivity Analysis**")
+            st.pyplot(plot8)
+            
+            st.markdown("**OH Concentration Dynamics**")
+            st.pyplot(plot11)
+            
+            st.info("""
+            **Insights from these plots:**
+            
+            **1. Contribution Analysis (top):**
+            - Shows the absolute and relative contributions of thermal vs chemical effects
+            - Reveals at which temperatures each mechanism dominates
+            
+            **2. Parameter Sensitivity (middle):**
+            - Shows how small changes in parameters affect the model predictions
+            - Helps identify which parameters are most critical for accurate predictions
+            
+            **3. OH Concentration Dynamics (bottom):**
+            - Shows how OH concentration and its derivatives change with temperature
+            - Inflection points indicate changes in reaction kinetics
+            """)
         
         # Download section
         st.divider()
         st.subheader("Export Results")
         
-        # Download plots
-        col1, col2, col3 = st.columns(3)
+        # Download plots - организовано по вкладкам
+        download_tab1, download_tab2, download_tab3, download_tab4 = st.tabs([
+            "📥 Basic Plots", 
+            "📥 Advanced Plots", 
+            "📥 Statistical Plots", 
+            "📥 Insight Plots"
+        ])
         
-        with col1:
-            if st.button("📥 Download Plot 1 (Data & Model)", key="dl_plot1"):
-                buf = io.BytesIO()
-                plot1.savefig(buf, format='png', dpi=600)
-                st.download_button(
-                    label="Download PNG (600 DPI)",
-                    data=buf.getvalue(),
-                    file_name="plot1_data_and_model.png",
-                    mime="image/png",
-                    key="dl_btn_plot1"
-                )
+        with download_tab1:
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📥 Download Plot 1 (Data & Model)", key="dl_plot1"):
+                    buf = io.BytesIO()
+                    plot1.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot1_data_and_model.png",
+                        mime="image/png",
+                        key="dl_btn_plot1"
+                    )
+                
+                if st.button("📥 Download Plot 2 (Contributions)", key="dl_plot2"):
+                    buf = io.BytesIO()
+                    plot2.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot2_contributions.png",
+                        mime="image/png",
+                        key="dl_btn_plot2"
+                    )
             
-            if st.button("📥 Download Plot 2 (Contributions)", key="dl_plot2"):
-                buf = io.BytesIO()
-                plot2.savefig(buf, format='png', dpi=600)
-                st.download_button(
-                    label="Download PNG (600 DPI)",
-                    data=buf.getvalue(),
-                    file_name="plot2_contributions.png",
-                    mime="image/png",
-                    key="dl_btn_plot2"
-                )
+            with col2:
+                if st.button("📥 Download Plot 3 (Histograms)", key="dl_plot3"):
+                    buf = io.BytesIO()
+                    plot3.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot3_histograms.png",
+                        mime="image/png",
+                        key="dl_btn_plot3"
+                    )
+                
+                if st.button("📥 Download Plot 4 (TEC & [OH])", key="dl_plot4"):
+                    buf = io.BytesIO()
+                    plot4.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot4_tec_and_oh.png",
+                        mime="image/png",
+                        key="dl_btn_plot4"
+                    )
         
-        with col2:
-            if st.button("📥 Download Plot 3 (Histograms)", key="dl_plot3"):
-                buf = io.BytesIO()
-                plot3.savefig(buf, format='png', dpi=600)
-                st.download_button(
-                    label="Download PNG (600 DPI)",
-                    data=buf.getvalue(),
-                    file_name="plot3_histograms.png",
-                    mime="image/png",
-                    key="dl_btn_plot3"
-                )
+        with download_tab2:
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📥 Download Plot 5 (ΔL/L₀ Correlation)", key="dl_plot5"):
+                    buf = io.BytesIO()
+                    plot5.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot5_dl_correlation.png",
+                        mime="image/png",
+                        key="dl_btn_plot5"
+                    )
+                
+                if st.button("📥 Download Plot 6 (TEC Correlation)", key="dl_plot6"):
+                    buf = io.BytesIO()
+                    plot6.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot6_tec_correlation.png",
+                        mime="image/png",
+                        key="dl_btn_plot6"
+                    )
             
-            if st.button("📥 Download Plot 4 (TEC & [OH])", key="dl_plot4"):
-                buf = io.BytesIO()
-                plot4.savefig(buf, format='png', dpi=600)
-                st.download_button(
-                    label="Download PNG (600 DPI)",
-                    data=buf.getvalue(),
-                    file_name="plot4_tec_and_oh.png",
-                    mime="image/png",
-                    key="dl_btn_plot4"
-                )
+            with col2:
+                if st.button("📥 Download Plot 9 (Phase Portrait)", key="dl_plot9"):
+                    buf = io.BytesIO()
+                    plot9.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot9_phase_portrait.png",
+                        mime="image/png",
+                        key="dl_btn_plot9"
+                    )
         
-        with col3:
-            if st.button("📥 Download Plot 5 (ΔL/L₀ Correlation)", key="dl_plot5"):
-                buf = io.BytesIO()
-                plot5.savefig(buf, format='png', dpi=600)
-                st.download_button(
-                    label="Download PNG (600 DPI)",
-                    data=buf.getvalue(),
-                    file_name="plot5_dl_correlation.png",
-                    mime="image/png",
-                    key="dl_btn_plot5"
-                )
+        with download_tab3:
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📥 Download Plot 10 (Residual Analysis)", key="dl_plot10"):
+                    buf = io.BytesIO()
+                    plot10.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot10_residual_analysis.png",
+                        mime="image/png",
+                        key="dl_btn_plot10"
+                    )
             
-            if st.button("📥 Download Plot 6 (TEC Correlation)", key="dl_plot6"):
-                buf = io.BytesIO()
-                plot6.savefig(buf, format='png', dpi=600)
-                st.download_button(
-                    label="Download PNG (600 DPI)",
-                    data=buf.getvalue(),
-                    file_name="plot6_tec_correlation.png",
-                    mime="image/png",
-                    key="dl_btn_plot6"
-                )
+            with col2:
+                if st.button("📥 Download Plot 12 (Correlation Matrix)", key="dl_plot12"):
+                    buf = io.BytesIO()
+                    plot12.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot12_correlation_matrix.png",
+                        mime="image/png",
+                        key="dl_btn_plot12"
+                    )
+        
+        with download_tab4:
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📥 Download Plot 7 (Contribution Analysis)", key="dl_plot7"):
+                    buf = io.BytesIO()
+                    plot7.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot7_contribution_analysis.png",
+                        mime="image/png",
+                        key="dl_btn_plot7"
+                    )
+                
+                if st.button("📥 Download Plot 8 (Sensitivity Analysis)", key="dl_plot8"):
+                    buf = io.BytesIO()
+                    plot8.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot8_sensitivity_analysis.png",
+                        mime="image/png",
+                        key="dl_btn_plot8"
+                    )
+            
+            with col2:
+                if st.button("📥 Download Plot 11 (OH Dynamics)", key="dl_plot11"):
+                    buf = io.BytesIO()
+                    plot11.savefig(buf, format='png', dpi=600)
+                    st.download_button(
+                        label="Download PNG (600 DPI)",
+                        data=buf.getvalue(),
+                        file_name="plot11_oh_dynamics.png",
+                        mime="image/png",
+                        key="dl_btn_plot11"
+                    )
         
         # Download data
         st.divider()
@@ -1135,7 +1736,9 @@ def main():
                     'Residual': st.session_state.fit_results['residuals'],
                     'TEC_exp_1e6K-1': st.session_state.fit_results['tec_exp'] * 1e6,
                     'TEC_model_1e6K-1': st.session_state.fit_results['tec_model'] * 1e6,
-                    'OH_concentration': st.session_state.fit_results['oh_concentration']
+                    'OH_concentration': st.session_state.fit_results['oh_concentration'],
+                    'Thermal_contribution': st.session_state.fit_results['thermal_contrib'],
+                    'Chemical_contribution': st.session_state.fit_results['chem_contrib']
                 })
                 csv = fitted_df.to_csv(index=False)
                 st.download_button(
@@ -1155,6 +1758,8 @@ MSE: {st.session_state.fit_results['mse']:.6e}
 RMSE: {st.session_state.fit_results['rmse']:.6e}
 R²: {st.session_state.fit_results['r2']:.6f}
 χ²: {st.session_state.fit_results['chi2']:.6f}
+N points: {st.session_state.fit_results['N_points']}
+Fitted parameters: {st.session_state.fit_results['n_free_params']}
 
 MODEL PARAMETERS
 ================
@@ -1167,6 +1772,7 @@ pH₂O = {st.session_state.fit_results['params']['pH2O']:.6f}
 Residue = {st.session_state.fit_results['params']['residue']:.6f}
 
 Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
+Fixed parameters: {', '.join([k for k, v in st.session_state.fit_results['fixed_params'].items() if v is not None])}
 """
                 st.download_button(
                     label="Download Parameters",
@@ -1187,6 +1793,7 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
         """
         <div style='text-align: center'>
             <p>Thermo-Mechanical Expansion Modeling Tool | For scientific publications | 600 DPI export</p>
+            <p>Includes 12 comprehensive plots for detailed analysis</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -1194,12 +1801,3 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
