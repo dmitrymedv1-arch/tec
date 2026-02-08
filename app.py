@@ -48,14 +48,14 @@ if 'plot_style' not in st.session_state:
     st.session_state.plot_style = {
         'point_color': '#1f77b4',
         'point_alpha': 0.8,
-        'model_line_color': 'black',
-        'thermal_line_color': 'blue',
-        'chemical_line_color': 'red',
-        'tec_exp_color': 'blue',
-        'tec_model_color': 'red',
-        'oh_color': 'green',
-        'bar_thermal_color': 'blue',
-        'bar_chemical_color': 'red',
+        'model_line_color': '#000000',
+        'thermal_line_color': '#0000FF',
+        'chemical_line_color': '#FF0000',
+        'tec_exp_color': '#0000FF',
+        'tec_model_color': '#FF0000',
+        'oh_color': '#00FF00',
+        'bar_thermal_color': '#0000FF',
+        'bar_chemical_color': '#FF0000',
         'cmap_style': 'viridis',
         'point_size': 50,
         'line_width': 2
@@ -570,46 +570,54 @@ with st.sidebar:
     with col1:
         st.session_state.plot_style['point_color'] = st.color_picker(
             "Point color", 
-            value=st.session_state.plot_style['point_color']  # Добавлен value=
+            value=st.session_state.plot_style['point_color'] if st.session_state.plot_style['point_color'].startswith('#') else '#1f77b4'
         )
+        
         st.session_state.plot_style['point_alpha'] = st.slider(
             "Point transparency", 
             0.1, 1.0, 
-            value=st.session_state.plot_style['point_alpha']  # Добавлен value=
+            value=st.session_state.plot_style['point_alpha']
         )
+        
         st.session_state.plot_style['model_line_color'] = st.color_picker(
             "Model line color", 
-            value=st.session_state.plot_style['model_line_color']  # Добавлен value=
+            value=st.session_state.plot_style['model_line_color'] if st.session_state.plot_style['model_line_color'].startswith('#') else '#000000'
         )
+        
         st.session_state.plot_style['thermal_line_color'] = st.color_picker(
             "Thermal line color", 
-            value=st.session_state.plot_style['thermal_line_color']  # Добавлен value=
+            value=st.session_state.plot_style['thermal_line_color'] if st.session_state.plot_style['thermal_line_color'].startswith('#') else '#0000FF'
         )
+        
         st.session_state.plot_style['chemical_line_color'] = st.color_picker(
             "Chemical line color", 
-            value=st.session_state.plot_style['chemical_line_color']  # Добавлен value=
+            value=st.session_state.plot_style['chemical_line_color'] if st.session_state.plot_style['chemical_line_color'].startswith('#') else '#FF0000'
         )
     
     with col2:
         st.session_state.plot_style['tec_exp_color'] = st.color_picker(
             "Exp. TEC color", 
-            value=st.session_state.plot_style['tec_exp_color']  # Добавлен value=
+            value=st.session_state.plot_style['tec_exp_color'] if st.session_state.plot_style['tec_exp_color'].startswith('#') else '#0000FF'
         )
+        
         st.session_state.plot_style['tec_model_color'] = st.color_picker(
             "Model TEC color", 
-            value=st.session_state.plot_style['tec_model_color']  # Добавлен value=
+            value=st.session_state.plot_style['tec_model_color'] if st.session_state.plot_style['tec_model_color'].startswith('#') else '#FF0000'
         )
+        
         st.session_state.plot_style['oh_color'] = st.color_picker(
             "[OH] line color", 
-            value=st.session_state.plot_style['oh_color']  # Добавлен value=
+            value=st.session_state.plot_style['oh_color'] if st.session_state.plot_style['oh_color'].startswith('#') else '#00FF00'
         )
+        
         st.session_state.plot_style['bar_thermal_color'] = st.color_picker(
             "Thermal bar color", 
-            value=st.session_state.plot_style['bar_thermal_color']  # Добавлен value=
+            value=st.session_state.plot_style['bar_thermal_color'] if st.session_state.plot_style['bar_thermal_color'].startswith('#') else '#0000FF'
         )
+        
         st.session_state.plot_style['bar_chemical_color'] = st.color_picker(
             "Chemical bar color", 
-            value=st.session_state.plot_style['bar_chemical_color']  # Добавлен value=
+            value=st.session_state.plot_style['bar_chemical_color'] if st.session_state.plot_style['bar_chemical_color'].startswith('#') else '#FF0000'
         )
     
     # Additional plot settings
@@ -914,4 +922,5 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
