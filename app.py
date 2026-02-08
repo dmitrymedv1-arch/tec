@@ -624,8 +624,8 @@ with st.sidebar:
         st.session_state.plot_style['line_width'] = st.slider(
             "Line width", 
             1.0, 5.0, 
-            st.session_state.plot_style['line_width'],
-            step=0.1  # Добавляем float step
+            float(st.session_state.plot_style['line_width']),
+            step=0.1
         )
     
     with col2:
@@ -916,5 +916,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
