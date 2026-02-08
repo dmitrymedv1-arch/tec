@@ -350,7 +350,7 @@ def create_plot2_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
            linewidth=style['line_width'], label='Total model')
     ax.plot(T, thermal_contrib + residue, '--', color=style['thermal_line_color'], 
            linewidth=style['line_width'], label='Thermal contribution')
-    ax.plot(T, chem_contrib + residue, '--', color=style['chemical_line_color'], 
+    ax.plot(T, chem_contrib - chem_contrib[-1], '--', color=style['chemical_line_color'], 
            linewidth=style['line_width'], label='Chemical contribution')
     
     ax.set_xlabel('Temperature (°C)', fontweight='bold', fontsize=11)
@@ -1194,6 +1194,7 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 
 if __name__ == "__main__":
     main()
+
 
 
 
