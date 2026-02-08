@@ -396,7 +396,7 @@ def create_plot5(fit_results, style):
     norm = Normalize(vmin=T.min(), vmax=T.max())
     
     sc = ax.scatter(dl_model, dl_exp, c=T, cmap=cmap, norm=norm,
-                   s=style['point_size'], edgecolor='none')
+                   s=style['point_size']*0.7, edgecolor='none')
     
     # Add colorbar
     cbar = fig.colorbar(sc, ax=ax)
@@ -430,7 +430,7 @@ def create_plot6(fit_results, style):
     norm = Normalize(vmin=T.min(), vmax=T.max())
     
     sc = ax.scatter(tec_model, tec_exp, c=T, cmap=cmap, norm=norm,
-                   s=style['point_size'], edgecolor='none')
+                   s=style['point_size']*0.7, edgecolor='none')
     
     # Add colorbar
     cbar = fig.colorbar(sc, ax=ax)
@@ -916,6 +916,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
