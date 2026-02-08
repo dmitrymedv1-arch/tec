@@ -46,16 +46,16 @@ if 'fit_results' not in st.session_state:
     st.session_state.fit_results = None
 if 'plot_style' not in st.session_state:
     st.session_state.plot_style = {
-        'point_color': '#1f77b4',
+        'point_color': '#1f77b4',      # matplotlib blue
         'point_alpha': 0.8,
-        'model_line_color': 'black',
-        'thermal_line_color': 'blue',
-        'chemical_line_color': 'red',
-        'tec_exp_color': 'blue',
-        'tec_model_color': 'red',
-        'oh_color': 'green',
-        'bar_thermal_color': 'blue',
-        'bar_chemical_color': 'red',
+        'model_line_color': '#000000', # black
+        'thermal_line_color': '#1f77b4', # blue
+        'chemical_line_color': '#d62728', # red
+        'tec_exp_color': '#1f77b4',    # blue
+        'tec_model_color': '#d62728',  # red
+        'oh_color': '#2ca02c',         # green
+        'bar_thermal_color': '#1f77b4', # blue
+        'bar_chemical_color': '#d62728', # red
         'cmap_style': 'viridis',
         'point_size': 50,
         'line_width': 2
@@ -914,3 +914,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
