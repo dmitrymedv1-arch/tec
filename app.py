@@ -375,20 +375,20 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     T_diff = T[-1] - T[0]
     
     if T_diff > 0:  # Нагрев (температура растёт)
-        # Тепловое изменение: от начального к текущему
+        # Тепловое изменение: расширение при нагреве (положительное)
         thermal_start = thermal_contrib[0] + residue
-        thermal_changes = thermal_start - (thermal_contrib + residue)
+        thermal_changes = (thermal_contrib + residue) - thermal_start
         
-        # Химическое изменение: от конечного к текущему
+        # Химическое изменение: сжатие при дегидратации (отрицательное)
         chem_end = chem_contrib[-1] + residue
         chem_changes = (chem_contrib + residue) - chem_end
         
     else:  # Охлаждение (температура падает)
-        # Тепловое изменение: от текущего к начальному (зеркально нагреву)
+        # Тепловое изменение: сжатие при охлаждении (отрицательное)
         thermal_end = thermal_contrib[-1] + residue
-        thermal_changes = thermal_end - (thermal_contrib + residue)
+        thermal_changes = (thermal_contrib + residue) - thermal_end
         
-        # Химическое изменение: от текущего к начальному (зеркально нагреву)
+        # Химическое изменение: расширение при гидратации (положительное)
         chem_start = chem_contrib[0] + residue
         chem_changes = chem_start - (chem_contrib + residue)
     
@@ -1194,6 +1194,7 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 
 if __name__ == "__main__":
     main()
+
 
 
 
