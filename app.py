@@ -575,7 +575,9 @@ with st.sidebar:
         
         st.session_state.plot_style['point_alpha'] = st.slider(
             "Point transparency", 
-            0.1, 1.0, 
+            min_value=0.1, 
+            max_value=1.0, 
+            step=0.1,
             value=st.session_state.plot_style['point_alpha']
         )
         
@@ -625,13 +627,17 @@ with st.sidebar:
     with col1:
         st.session_state.plot_style['point_size'] = st.slider(
             "Point size", 
-            10, 100, 
-            value=st.session_state.plot_style['point_size']  # Добавлен value=
+            min_value=10, 
+            max_value=100, 
+            step=1,
+            value=st.session_state.plot_style['point_size']
         )
         st.session_state.plot_style['line_width'] = st.slider(
             "Line width", 
-            1.0, 5.0, 
-            value=st.session_state.plot_style['line_width']  # Добавлен value=
+            min_value=1.0, 
+            max_value=5.0, 
+            step=0.1,
+            value=st.session_state.plot_style['line_width']
         )
     
     with col2:
@@ -922,5 +928,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
