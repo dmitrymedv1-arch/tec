@@ -763,19 +763,19 @@ def main():
                         
                         # Set bounds for each parameter
                         if name == 'Acc':
-                            initial_guess[f'{name}_bounds'] = (0.01, 10.0)
+                            initial_guess[f'{name}_bounds'] = (0.001, 0.9)
                         elif name == 'alpha_1e6':
                             initial_guess[f'{name}_bounds'] = (1.0, 100.0)
                         elif name == 'beta':
-                            initial_guess[f'{name}_bounds'] = (0.0001, 1.0)
+                            initial_guess[f'{name}_bounds'] = (0.0001, 0.1)
                         elif name == 'dH':
                             initial_guess[f'{name}_bounds'] = (-200.0, -10.0)
                         elif name == 'dS':
-                            initial_guess[f'{name}_bounds'] = (-300.0, -50.0)
+                            initial_guess[f'{name}_bounds'] = (-300.0, -10.0)
                         elif name == 'pH2O':
-                            initial_guess[f'{name}_bounds'] = (0.001, 1.0)
+                            initial_guess[f'{name}_bounds'] = (0.00001, 1.0)
                         elif name == 'residue':
-                            initial_guess[f'{name}_bounds'] = (-0.01, 0.01)
+                            initial_guess[f'{name}_bounds'] = (-0.05, 0.05)
                     
                     # Perform fitting
                     with st.spinner("Fitting model..."):
@@ -1194,6 +1194,7 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 
 if __name__ == "__main__":
     main()
+
 
 
 
