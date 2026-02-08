@@ -1,0 +1,10 @@
+streamlit
+numpy
+pandas
+plotly
+scipy
+kaleido
+pymc
+arviz
+openpyxl
+xlrd
