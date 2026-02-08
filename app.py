@@ -381,7 +381,7 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
         
         # Химическое изменение: сжатие при дегидратации (отрицательное)
         chem_end = chem_contrib[-1] + residue
-        chem_changes = (chem_contrib + residue) - chem_end
+        chem_changes = chem_end - (chem_contrib + residue)
         
     else:  # Охлаждение (температура падает)
         # Тепловое изменение: сжатие при охлаждении (отрицательное)
@@ -390,7 +390,7 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
         
         # Химическое изменение: расширение при гидратации (положительное)
         chem_start = chem_contrib[0] + residue
-        chem_changes = chem_start - (chem_contrib + residue)
+        chem_changes = (chem_contrib + residue) - chem_start
     
     bar_width = (T[1] - T[0]) * 0.7 if len(T) > 1 else 10
     ax.bar(T - bar_width/2, thermal_changes, width=bar_width, 
@@ -1194,6 +1194,7 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 
 if __name__ == "__main__":
     main()
+
 
 
 
