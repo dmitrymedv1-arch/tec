@@ -311,11 +311,14 @@ def create_plot1_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     dl_model = fit_results['dl_model']
     residuals = fit_results['residuals']
     
-    ax1.plot(T, dl_model, '-', color=style['model_line_color'], 
-            linewidth=style['line_width'], label='Model', zorder=3)
+    # ИЗМЕНЕНИЕ: сначала рисуем экспериментальные точки
     ax1.scatter(T, dl_exp, s=style['point_size'], color=style['point_color'], 
                edgecolor='none', 
                label='Experimental', zorder=3, alpha=style['point_alpha'])
+    
+    # ИЗМЕНЕНИЕ: потом рисуем модельную линию с более высоким zorder
+    ax1.plot(T, dl_model, '-', color=style['model_line_color'], 
+            linewidth=style['line_width'], label='Model', zorder=4)
     
     ax1.set_ylabel('ΔL/L₀', fontweight='bold', fontsize=11)
     ax1.legend(loc='best')
@@ -1170,5 +1173,6 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 
 if __name__ == "__main__":
     main()
+
 
 
