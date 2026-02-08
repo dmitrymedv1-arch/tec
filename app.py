@@ -258,8 +258,8 @@ def create_plot1(fit_results, style):
     ax1.plot(T, dl_model, '-', color=style['model_line_color'], 
             linewidth=style['line_width'], label='Model', zorder=3)
     ax1.scatter(T, dl_exp, s=style['point_size'], color=style['point_color'], 
-               edgecolor=edge_color, linewidth=1.5, 
-               label='Experimental', zorder=4, alpha=style['point_alpha'])
+               edgecolor='none', 
+               label='Experimental', zorder=3, alpha=style['point_alpha'])
     
     ax1.set_ylabel('ΔL/L₀', fontweight='bold', fontsize=11)
     ax1.legend(loc='best')
@@ -916,6 +916,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
 
 
 
