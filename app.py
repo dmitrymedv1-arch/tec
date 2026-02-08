@@ -570,46 +570,46 @@ with st.sidebar:
     with col1:
         st.session_state.plot_style['point_color'] = st.color_picker(
             "Point color", 
-            st.session_state.plot_style['point_color']
+            value=st.session_state.plot_style['point_color']  # Добавлен value=
         )
         st.session_state.plot_style['point_alpha'] = st.slider(
             "Point transparency", 
             0.1, 1.0, 
-            st.session_state.plot_style['point_alpha']
+            value=st.session_state.plot_style['point_alpha']  # Добавлен value=
         )
         st.session_state.plot_style['model_line_color'] = st.color_picker(
             "Model line color", 
-            st.session_state.plot_style['model_line_color']
+            value=st.session_state.plot_style['model_line_color']  # Добавлен value=
         )
         st.session_state.plot_style['thermal_line_color'] = st.color_picker(
             "Thermal line color", 
-            st.session_state.plot_style['thermal_line_color']
+            value=st.session_state.plot_style['thermal_line_color']  # Добавлен value=
         )
         st.session_state.plot_style['chemical_line_color'] = st.color_picker(
             "Chemical line color", 
-            st.session_state.plot_style['chemical_line_color']
+            value=st.session_state.plot_style['chemical_line_color']  # Добавлен value=
         )
     
     with col2:
         st.session_state.plot_style['tec_exp_color'] = st.color_picker(
             "Exp. TEC color", 
-            st.session_state.plot_style['tec_exp_color']
+            value=st.session_state.plot_style['tec_exp_color']  # Добавлен value=
         )
         st.session_state.plot_style['tec_model_color'] = st.color_picker(
             "Model TEC color", 
-            st.session_state.plot_style['tec_model_color']
+            value=st.session_state.plot_style['tec_model_color']  # Добавлен value=
         )
         st.session_state.plot_style['oh_color'] = st.color_picker(
             "[OH] line color", 
-            st.session_state.plot_style['oh_color']
+            value=st.session_state.plot_style['oh_color']  # Добавлен value=
         )
         st.session_state.plot_style['bar_thermal_color'] = st.color_picker(
             "Thermal bar color", 
-            st.session_state.plot_style['bar_thermal_color']
+            value=st.session_state.plot_style['bar_thermal_color']  # Добавлен value=
         )
         st.session_state.plot_style['bar_chemical_color'] = st.color_picker(
             "Chemical bar color", 
-            st.session_state.plot_style['bar_chemical_color']
+            value=st.session_state.plot_style['bar_chemical_color']  # Добавлен value=
         )
     
     # Additional plot settings
@@ -618,12 +618,12 @@ with st.sidebar:
         st.session_state.plot_style['point_size'] = st.slider(
             "Point size", 
             10, 100, 
-            st.session_state.plot_style['point_size']
+            value=st.session_state.plot_style['point_size']  # Добавлен value=
         )
         st.session_state.plot_style['line_width'] = st.slider(
             "Line width", 
             1.0, 5.0, 
-            st.session_state.plot_style['line_width']
+            value=st.session_state.plot_style['line_width']  # Добавлен value=
         )
     
     with col2:
@@ -631,7 +631,7 @@ with st.sidebar:
                        'coolwarm', 'RdYlBu', 'Spectral', 'rainbow', 'jet']
         st.session_state.plot_style['cmap_style'] = st.selectbox(
             "Temperature colormap", 
-            cmap_options, 
+            options=cmap_options,  # Добавлен options=
             index=cmap_options.index(st.session_state.plot_style['cmap_style'])
         )
     
@@ -914,3 +914,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
