@@ -371,11 +371,20 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     chem_contrib = fit_results['chem_contrib']
     residue = fit_results['params']['residue']
     
+    # Тепловое изменение всегда считается от начальной точки
     thermal_start = thermal_contrib[0] + residue
     thermal_changes = thermal_start - (thermal_contrib + residue)
     
-    chem_end = chem_contrib[-1] + residue
-    chem_changes = (chem_contrib + residue) - chem_end
+    # Химическое изменение зависит от направления изменения температуры
+    # Определяем нагрев (T увеличивается) или охлаждение (T уменьшается)
+    T_diff = T[-1] - T[0]
+    
+    if T_diff > 0:  # Нагрев (температура растёт)
+        chem_end = chem_contrib[-1] + residue
+        chem_changes = (chem_contrib + residue) - chem_end
+    else:  # Охлаждение (температура падает)
+        chem_start = chem_contrib[0] + residue
+        chem_changes = chem_start - (chem_contrib + residue)
     
     bar_width = (T[1] - T[0]) * 0.7 if len(T) > 1 else 10
     ax.bar(T - bar_width/2, thermal_changes, width=bar_width, 
@@ -387,6 +396,12 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     ax.set_ylabel('Change in ΔL/L₀', fontweight='bold', fontsize=11)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3, linestyle='--', axis='y')
+    
+    # Добавляем аннотацию о направлении
+    direction = "Heating" if T_diff > 0 else "Cooling"
+    ax.text(0.98, 0.98, direction, transform=ax.transAxes,
+           ha='right', va='top', fontweight='bold',
+           bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
     
     fig.set_dpi(600)
     return fig
@@ -1173,6 +1188,7 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 
 if __name__ == "__main__":
     main()
+
 
 
 
