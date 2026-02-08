@@ -409,7 +409,7 @@ def create_plot4_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     
     # Position legend on the right side, centered vertically
     ax1.legend(handles=legend_elements, loc='center left', 
-              bbox_to_anchor=(0.98, 0.5), frameon=True, framealpha=0.9)
+              bbox_to_anchor=(0.45, 0.5), frameon=True, framealpha=0.9)
     
     # TEC residual plot
     tec_residuals = fit_results['tec_exp'] - fit_results['tec_model']
@@ -1149,3 +1149,4 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 
 if __name__ == "__main__":
     main()
+
