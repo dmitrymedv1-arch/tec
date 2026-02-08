@@ -371,18 +371,24 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     chem_contrib = fit_results['chem_contrib']
     residue = fit_results['params']['residue']
     
-    # Тепловое изменение всегда считается от начальной точки
-    thermal_start = thermal_contrib[0] + residue
-    thermal_changes = thermal_start - (thermal_contrib + residue)
-    
-    # Химическое изменение зависит от направления изменения температуры
-    # Определяем нагрев (T увеличивается) или охлаждение (T уменьшается)
+    # Определяем направление изменения температуры (нагрев или охлаждение)
     T_diff = T[-1] - T[0]
     
     if T_diff > 0:  # Нагрев (температура растёт)
+        # Тепловое изменение: от начального к текущему
+        thermal_start = thermal_contrib[0] + residue
+        thermal_changes = thermal_start - (thermal_contrib + residue)
+        
+        # Химическое изменение: от конечного к текущему
         chem_end = chem_contrib[-1] + residue
         chem_changes = (chem_contrib + residue) - chem_end
+        
     else:  # Охлаждение (температура падает)
+        # Тепловое изменение: от текущего к начальному (зеркально нагреву)
+        thermal_end = thermal_contrib[-1] + residue
+        thermal_changes = thermal_end - (thermal_contrib + residue)
+        
+        # Химическое изменение: от текущего к начальному (зеркально нагреву)
         chem_start = chem_contrib[0] + residue
         chem_changes = chem_start - (chem_contrib + residue)
     
@@ -1188,6 +1194,7 @@ Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 
 if __name__ == "__main__":
     main()
+
 
 
 
