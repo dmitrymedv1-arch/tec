@@ -1083,36 +1083,40 @@ def main():
                     value=st.session_state.model_params['Acc']['value'],
                     step=0.01, 
                     format="%.4f",
-                    key="acc_input"
+                    key=f"acc_input_{st.session_state.model_params['Acc']['value']}"  # Динамический ключ
                 )
-                acc_fixed = st.checkbox("Fix", value=st.session_state.model_params['Acc']['fixed'], key="acc_fix")
+                acc_fixed = st.checkbox("Fix", value=st.session_state.model_params['Acc']['fixed'], 
+                                       key=f"acc_fix_{st.session_state.model_params['Acc']['fixed']}")  # Динамический ключ
                 
                 alpha_value = st.number_input(
                     "α·10⁶", 
                     value=st.session_state.model_params['alpha_1e6']['value'],
                     step=0.1, 
                     format="%.4f",
-                    key="alpha_input"
+                    key=f"alpha_input_{st.session_state.model_params['alpha_1e6']['value']}"  # Динамический ключ
                 )
-                alpha_fixed = st.checkbox("Fix", value=st.session_state.model_params['alpha_1e6']['fixed'], key="alpha_fix")
+                alpha_fixed = st.checkbox("Fix", value=st.session_state.model_params['alpha_1e6']['fixed'],
+                                         key=f"alpha_fix_{st.session_state.model_params['alpha_1e6']['fixed']}")  # Динамический ключ
                 
                 beta_value = st.number_input(
                     "β", 
                     value=st.session_state.model_params['beta']['value'],
                     step=0.001, 
                     format="%.4f",
-                    key="beta_input"
+                    key=f"beta_input_{st.session_state.model_params['beta']['value']}"  # Динамический ключ
                 )
-                beta_fixed = st.checkbox("Fix", value=st.session_state.model_params['beta']['fixed'], key="beta_fix")
+                beta_fixed = st.checkbox("Fix", value=st.session_state.model_params['beta']['fixed'],
+                                        key=f"beta_fix_{st.session_state.model_params['beta']['fixed']}")  # Динамический ключ
                 
                 dH_value = st.number_input(
                     "ΔH (kJ/mol)", 
                     value=st.session_state.model_params['dH']['value'],
                     step=1.0, 
                     format="%.2f",
-                    key="dH_input"
+                    key=f"dH_input_{st.session_state.model_params['dH']['value']}"  # Динамический ключ
                 )
-                dH_fixed = st.checkbox("Fix", value=st.session_state.model_params['dH']['fixed'], key="dH_fix")
+                dH_fixed = st.checkbox("Fix", value=st.session_state.model_params['dH']['fixed'],
+                                      key=f"dH_fix_{st.session_state.model_params['dH']['fixed']}")  # Динамический ключ
             
             with col2:
                 dS_value = st.number_input(
@@ -1120,27 +1124,30 @@ def main():
                     value=st.session_state.model_params['dS']['value'],
                     step=1.0, 
                     format="%.2f",
-                    key="dS_input"
+                    key=f"dS_input_{st.session_state.model_params['dS']['value']}"  # Динамический ключ
                 )
-                dS_fixed = st.checkbox("Fix", value=st.session_state.model_params['dS']['fixed'], key="dS_fix")
+                dS_fixed = st.checkbox("Fix", value=st.session_state.model_params['dS']['fixed'],
+                                      key=f"dS_fix_{st.session_state.model_params['dS']['fixed']}")  # Динамический ключ
                 
                 pH2O_value = st.number_input(
                     "pH₂O", 
                     value=st.session_state.model_params['pH2O']['value'],
                     step=0.001, 
                     format="%.4f",
-                    key="pH2O_input"
+                    key=f"pH2O_input_{st.session_state.model_params['pH2O']['value']}"  # Динамический ключ
                 )
-                pH2O_fixed = st.checkbox("Fix", value=st.session_state.model_params['pH2O']['fixed'], key="pH2O_fix")
+                pH2O_fixed = st.checkbox("Fix", value=st.session_state.model_params['pH2O']['fixed'],
+                                        key=f"pH2O_fix_{st.session_state.model_params['pH2O']['fixed']}")  # Динамический ключ
                 
                 residue_value = st.number_input(
                     "Residue", 
                     value=st.session_state.model_params['residue']['value'],
                     step=0.0001, 
                     format="%.6f",
-                    key="residue_input"
+                    key=f"residue_input_{st.session_state.model_params['residue']['value']}"  # Динамический ключ
                 )
-                residue_fixed = st.checkbox("Fix", value=st.session_state.model_params['residue']['fixed'], key="residue_fix")
+                residue_fixed = st.checkbox("Fix", value=st.session_state.model_params['residue']['fixed'],
+                                           key=f"residue_fix_{st.session_state.model_params['residue']['fixed']}")  # Динамический ключ
             
             # Кнопка фиттинга внутри формы
             fit_button = st.form_submit_button("🚀 Fit Model and Create Plots", type="primary", use_container_width=True)
