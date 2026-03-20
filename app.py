@@ -2527,14 +2527,15 @@ def main():
                         index=['Al', 'Ga', 'In', 'Sc', 'Y', 'Yb', 'Ho', 'Dy', 'Gd', 'Sm', 'Nd', 'La'].index(st.session_state.composition['M'])
                     )
                     
-                    x_value = st.slider(
-                        "x (acceptor concentration)",
-                        min_value=0.01,
-                        max_value=0.99,
-                        value=st.session_state.composition['x'],
-                        step=0.01,
-                        format="%.2f"
+                    acc_value = st.session_state.model_params['Acc']['value']
+                    x_value = st.number_input(
+                        "x (acceptor concentration) = [Acc]",
+                        value=acc_value,
+                        format="%.4f",
+                        disabled=True,
+                        help="Значение автоматически берется из параметра [Acc] в Stage 1"
                     )
+                    st.session_state.composition['x'] = acc_value
                 
                 use_shannon = st.checkbox("Use Shannon's ionic radii for comparison", value=False)
                 
