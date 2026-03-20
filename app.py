@@ -3,10 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit, fsolve
 from scipy.stats import norm, probplot
-try:
-    from scipy.misc import derivative  # for older scipy versions (<1.12)
-except ImportError:
-    from scipy.optimize import derivative  # for newer scipy versions (>=1.12)
 import pandas as pd
 import io
 import warnings
