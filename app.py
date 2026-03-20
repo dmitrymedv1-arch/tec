@@ -272,6 +272,17 @@ st.markdown("""
         color: #667eea;
         font-weight: bold;
     }
+    
+    /* Return button styling */
+    .return-button {
+        background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%) !important;
+        margin-top: 10px;
+    }
+    
+    .return-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(17, 153, 142, 0.4);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -502,7 +513,344 @@ def format_composition(A: str, B: str, M: str, x: float) -> str:
         return f"{A}{B}$_{{{1-x:.2f}}}${M}$_{{{x:.2f}}}$O$_{{3-x/2}}$"
 
 # ============================================
-# INVERSE PROBLEM CALCULATIONS
+# UPDATED MODEL FUNCTIONS FOR PROTON CONCENTRATION
+# ============================================
+
+def calculate_oh_accurate(T: np.ndarray, Acc: float, dH: float, dS: float, pH2O: float) -> np.ndarray:
+    """
+    Calculate [OH] concentration using the accurate analytical expression.
+    
+    From the equilibrium:
+    Kw = 4[OH]^2 / (pH2O * ([Acc] - [OH]) * (6 - [Acc] - [OH]))
+    
+    The analytical solution is:
+    [OH] = (3*Kw*pH2O - sqrt(Kw*pH2O*(9*Kw*pH2O - 6*Kw*pH2O*Acc + Kw*pH2O*Acc^2 + 24*Acc - 4*Acc^2))) / (Kw*pH2O - 4)
+    
+    Parameters:
+    -----------
+    T : np.ndarray
+        Temperature in Celsius
+    Acc : float
+        Acceptor concentration
+    dH : float
+        Enthalpy of hydration (kJ/mol)
+    dS : float
+        Entropy of hydration (J/mol·K)
+    pH2O : float
+        Water vapor pressure (atm)
+    
+    Returns:
+    --------
+    np.ndarray
+        Proton concentration [OH]
+    """
+    T_K = T + 273.15
+    R = 8.314  # Gas constant in J/mol·K
+    
+    # Calculate equilibrium constant
+    Kw = np.exp(-dH * 1000 / (R * T_K) + dS / R)
+    
+    # Calculate the term under the square root
+    sqrt_term = Kw * pH2O * (9 * Kw * pH2O - 6 * Kw * pH2O * Acc + Kw * pH2O * Acc**2 + 24 * Acc - 4 * Acc**2)
+    
+    # Ensure sqrt_term is non-negative (numerical stability)
+    sqrt_term = np.maximum(sqrt_term, 0)
+    
+    # Calculate denominator
+    denominator = Kw * pH2O - 4
+    
+    # Handle denominator near zero (numerical stability)
+    denominator = np.where(np.abs(denominator) < 1e-10, 1e-10, denominator)
+    
+    # Calculate numerator
+    numerator = 3 * Kw * pH2O - np.sqrt(sqrt_term)
+    
+    # Calculate [OH]
+    oh = numerator / denominator
+    
+    # Ensure [OH] is between 0 and Acc
+    oh = np.clip(oh, 0, Acc)
+    
+    return oh
+
+# ============================================
+# IONIC RADIUS MODEL FOR CHEMICAL EXPANSION
+# ============================================
+
+class IonicRadiusModel:
+    """
+    Class implementing the ionic radius-based model for chemical expansion.
+    
+    Based on equations from Zuev et al. (2022) and Løken et al. (2018).
+    """
+    
+    def __init__(self, A: str, B: str, M: str, x: float, use_shannon: bool = False):
+        """
+        Initialize the ionic radius model.
+        
+        Parameters:
+        -----------
+        A, B, M : str
+            Element symbols for A-site, B-site, and acceptor
+        x : float
+            Acceptor concentration
+        use_shannon : bool
+            If True, use Shannon's ionic radii
+        """
+        self.A = A
+        self.B = B
+        self.M = M
+        self.x = x
+        self.use_shannon = use_shannon
+        
+        # Constants
+        self.r_O = get_radius('O2-', -2, 4, use_shannon)
+        self.r_OH_table = get_radius('OH-', -1, 4, use_shannon)
+        
+        # Calculate sensitivity coefficients k = dr/dCN
+        self._calculate_sensitivity_coefficients()
+        
+        # Calculate reference state (dry, maximum vacancies)
+        self._calculate_reference_state()
+    
+    def _calculate_sensitivity_coefficients(self):
+        """
+        Calculate sensitivity coefficients k = dr/dCN for each cation.
+        
+        For A-site: interpolate between CN=8 and CN=12
+        For B-site and M-site: interpolate between CN=6 and CN=8
+        """
+        # A-site (2+)
+        r_A_8 = get_radius_interp(self.A, 2, 8, self.use_shannon, coord_points=(8, 12))
+        r_A_12 = get_radius_interp(self.A, 2, 12, self.use_shannon, coord_points=(8, 12))
+        self.k_A = (r_A_12 - r_A_8) / 4  # Δr per CN unit
+        self.r_A_base = r_A_12  # Reference radius at CN=12
+        
+        # B-site (4+)
+        r_B_6 = get_radius_interp(self.B, 4, 6, self.use_shannon, coord_points=(6, 8))
+        r_B_8 = get_radius_interp(self.B, 4, 8, self.use_shannon, coord_points=(6, 8))
+        self.k_B = (r_B_8 - r_B_6) / 2  # Δr per CN unit
+        self.r_B_base = r_B_6  # Reference radius at CN=6
+        
+        # M-site (3+, acceptor)
+        r_M_6 = get_radius_interp(self.M, 3, 6, self.use_shannon, coord_points=(6, 8))
+        r_M_8 = get_radius_interp(self.M, 3, 8, self.use_shannon, coord_points=(6, 8))
+        self.k_M = (r_M_8 - r_M_6) / 2  # Δr per CN unit
+        self.r_M_base = r_M_6  # Reference radius at CN=6
+    
+    def _calculate_reference_state(self):
+        """
+        Calculate reference state parameters (dry, maximum vacancies).
+        
+        In dry state: delta_dry = x/2
+        """
+        self.delta_dry = self.x / 2.0
+        
+        # Coordination numbers in dry state (Equation 35 from Zuev et al.)
+        self.CN_A_dry = max(12 - 4 * self.delta_dry, 8)
+        self.CN_B_dry = max(6 - 2 * self.delta_dry, 4)
+        self.CN_M_dry = self.CN_B_dry
+        
+        # Ionic radii in dry state (using linear interpolation)
+        self.r_A_dry = self.r_A_base - self.k_A * (12 - self.CN_A_dry)
+        self.r_B_dry = self.r_B_base - self.k_B * (6 - self.CN_B_dry)
+        self.r_M_dry = self.r_M_base - self.k_M * (6 - self.CN_M_dry)
+        
+        # Lattice sum in dry state (proportional to unit cell size)
+        # S0 = r_A + (1-x)*r_B + x*r_M + (3 - delta)*r_O
+        self.S0 = (self.r_A_dry + 
+                   (1 - self.x) * self.r_B_dry + 
+                   self.x * self.r_M_dry + 
+                   (3 - self.delta_dry) * self.r_O)
+    
+    def calculate_hydrated_state(self, y: float) -> Dict[str, float]:
+        """
+        Calculate parameters for hydrated state with given y.
+        
+        Parameters:
+        -----------
+        y : float
+            Degree of hydration (0 ≤ y ≤ x)
+        
+        Returns:
+        --------
+        Dict[str, float]
+            Dictionary with hydrated state parameters
+        """
+        # Remaining vacancies after hydration
+        delta_wet = self.delta_dry - y/2
+        
+        # Coordination numbers in hydrated state
+        CN_A_wet = max(12 - 4 * delta_wet, 8)
+        CN_B_wet = max(6 - 2 * delta_wet, 4)
+        CN_M_wet = CN_B_wet
+        
+        # Ionic radii in hydrated state
+        r_A_wet = self.r_A_base - self.k_A * (12 - CN_A_wet)
+        r_B_wet = self.r_B_base - self.k_B * (6 - CN_B_wet)
+        r_M_wet = self.r_M_base - self.k_M * (6 - CN_M_wet)
+        
+        # Lattice sum in hydrated state
+        # S = r_A + (1-x)*r_B + x*r_M + (3 - delta_wet - y/2)*r_O + y*r_OH
+        # Note: (3 - delta_wet - y/2) = (3 - delta_dry) because delta_wet = delta_dry - y/2
+        S_wet = (r_A_wet + 
+                 (1 - self.x) * r_B_wet + 
+                 self.x * r_M_wet + 
+                 (3 - self.delta_dry) * self.r_O + 
+                 y * self.r_OH_table)
+        
+        return {
+            'delta_wet': delta_wet,
+            'CN_A_wet': CN_A_wet,
+            'CN_B_wet': CN_B_wet,
+            'CN_M_wet': CN_M_wet,
+            'r_A_wet': r_A_wet,
+            'r_B_wet': r_B_wet,
+            'r_M_wet': r_M_wet,
+            'S_wet': S_wet
+        }
+    
+    def calculate_beta_chem_theoretical(self) -> float:
+        """
+        Calculate theoretical chemical expansion coefficient β.
+        
+        β_theory = (S_wet_full - S0) / (S0 * x)
+        where S_wet_full is the lattice sum for fully hydrated state (y = x)
+        """
+        hydrated_full = self.calculate_hydrated_state(self.x)
+        beta_theory = (hydrated_full['S_wet'] - self.S0) / (self.S0 * self.x)
+        return beta_theory
+    
+    def calculate_effective_oh_radius(self, beta_exp: float) -> float:
+        """
+        Calculate effective OH- radius from experimental β.
+        
+        From: β_exp = (S_wet - S0) / (S0 * x)
+        and S_wet = r_A_wet + (1-x)*r_B_wet + x*r_M_wet + (3 - delta_dry)*r_O + x*r_OH_eff
+        
+        Therefore:
+        r_OH_eff = [S0*(1 + β_exp*x) - (r_A_wet + (1-x)*r_B_wet + x*r_M_wet + (3 - delta_dry)*r_O)] / x
+        """
+        # For fully hydrated state (y = x), CNs are at maximum
+        r_A_wet = self.r_A_base  # CN=12
+        r_B_wet = self.r_B_base  # CN=6
+        r_M_wet = self.r_M_base  # CN=6
+        
+        cation_sum = r_A_wet + (1 - self.x) * r_B_wet + self.x * r_M_wet
+        anion_base = (3 - self.delta_dry) * self.r_O
+        
+        r_OH_eff = (self.S0 * (1 + beta_exp * self.x) - cation_sum - anion_base) / self.x
+        return r_OH_eff
+    
+    def calculate_effective_vacancy_radius(self, beta_exp: float) -> float:
+        """
+        Calculate effective oxygen vacancy radius from experimental β.
+        
+        Using the Hong-Virkar type model:
+        r_V_eff = 4*(r_B_base + r_O)*(β_exp - (r_M_base - r_B_base)/(r_B_base + r_O)) + r_O
+        """
+        # Calculate the cation contribution to expansion
+        cation_contrib = (self.r_M_base - self.r_B_base) / (self.r_B_base + self.r_O)
+        
+        # Total expansion β_exp = cation_contrib + (r_V_eff - r_O)/(4*(r_B_base + r_O))
+        r_V_eff = 4 * (self.r_B_base + self.r_O) * (beta_exp - cation_contrib) + self.r_O
+        
+        return r_V_eff
+    
+    def get_coordination_numbers_temperature(self, T: np.ndarray, oh: np.ndarray) -> Dict[str, np.ndarray]:
+        """
+        Calculate coordination numbers as a function of temperature.
+        
+        Parameters:
+        -----------
+        T : np.ndarray
+            Temperature in Celsius
+        oh : np.ndarray
+            Proton concentration at each temperature
+        
+        Returns:
+        --------
+        Dict[str, np.ndarray]
+            Dictionary with CN_A, CN_B, CN_M for each temperature
+        """
+        # y is the degree of hydration (0 to x)
+        y = oh  # [OH] concentration directly gives y
+        
+        # Remaining vacancies
+        delta = self.delta_dry - y/2
+        
+        # Coordination numbers
+        CN_A = 12 - 4 * delta
+        CN_B = 6 - 2 * delta
+        CN_M = CN_B
+        
+        # Ensure CNs are within reasonable limits
+        CN_A = np.maximum(CN_A, 8)
+        CN_B = np.maximum(CN_B, 4)
+        CN_M = CN_B
+        
+        return {
+            'CN_A': CN_A,
+            'CN_B': CN_B,
+            'CN_M': CN_M
+        }
+    
+    def calculate_radius_contributions(self, T: np.ndarray, oh: np.ndarray) -> Dict[str, np.ndarray]:
+        """
+        Calculate individual contributions to chemical expansion.
+        
+        Returns:
+        --------
+        Dict with contributions from each site and total chemical expansion
+        """
+        y = oh
+        delta = self.delta_dry - y/2
+        
+        # Coordination numbers
+        CN_A = 12 - 4 * delta
+        CN_B = 6 - 2 * delta
+        CN_M = CN_B
+        
+        CN_A = np.maximum(CN_A, 8)
+        CN_B = np.maximum(CN_B, 4)
+        CN_M = CN_B
+        
+        # Current radii
+        r_A_curr = self.r_A_base - self.k_A * (12 - CN_A)
+        r_B_curr = self.r_B_base - self.k_B * (6 - CN_B)
+        r_M_curr = self.r_M_base - self.k_M * (6 - CN_M)
+        
+        # Cation contributions to expansion (relative to dry state)
+        delta_r_A = r_A_curr - self.r_A_dry
+        delta_r_B = r_B_curr - self.r_B_dry
+        delta_r_M = r_M_curr - self.r_M_dry
+        
+        # Anion contribution (OH replacing O and vacancies disappearing)
+        # At each point, the number of OH is y, and remaining O is (3 - delta_dry)
+        delta_anion = y * self.r_OH_table - (y/2) * self.r_O  # Net effect
+        
+        # Total chemical expansion relative to dry state
+        chem_expansion = (delta_r_A + 
+                          (1 - self.x) * delta_r_B + 
+                          self.x * delta_r_M + 
+                          delta_anion) / self.S0
+        
+        return {
+            'r_A_curr': r_A_curr,
+            'r_B_curr': r_B_curr,
+            'r_M_curr': r_M_curr,
+            'delta_r_A': delta_r_A,
+            'delta_r_B': delta_r_B,
+            'delta_r_M': delta_r_M,
+            'delta_anion': delta_anion,
+            'chem_expansion': chem_expansion,
+            'CN_A': CN_A,
+            'CN_B': CN_B,
+            'CN_M': CN_M
+        }
+
+# ============================================
+# INVERSE PROBLEM CALCULATIONS (UPDATED)
 # ============================================
 
 class InverseProblemSolver:
@@ -543,72 +891,28 @@ class InverseProblemSolver:
         self.pH2O = self.params['pH2O']
         self.Acc = self.params['Acc']
         
+        # Initialize ionic radius model
+        self.radius_model = IonicRadiusModel(A, B, M, x, use_shannon)
+        
         # Constants
-        self.r_O = get_radius('O2-', -2, 4, use_shannon)
-        self.r_OH_table = get_radius('OH-', -1, 4, use_shannon)
-        self.N_sites = 6  # Number of oxygen sites per formula unit
+        self.r_O = self.radius_model.r_O
+        self.r_OH_table = self.radius_model.r_OH_table
         
-        # Calculate initial state (dry, maximum vacancies)
-        self.delta_dry = x / 2.0
-        self._calculate_dry_state()
-        
-        # Calculate fully hydrated state (all vacancies filled)
-        self._calculate_hydrated_state()
+        # Reference state parameters
+        self.S0 = self.radius_model.S0
+        self.delta_dry = self.radius_model.delta_dry
+        self.r_A_dry = self.radius_model.r_A_dry
+        self.r_B_dry = self.radius_model.r_B_dry
+        self.r_M_dry = self.radius_model.r_M_dry
         
         # Results dictionary
         self.results = {}
     
-    def _calculate_dry_state(self):
-        """Calculate parameters for dry state (maximum vacancies)."""
-        # Coordination numbers in dry state (Equation 35 from Zuev et al.)
-        self.CN_A_dry = max(12 - 4 * self.delta_dry, 6)
-        self.CN_B_dry = max(6 - 2 * self.delta_dry, 4)
-        self.CN_M_dry = self.CN_B_dry
-        
-        # Ionic radii in dry state
-        self.r_A_dry = get_radius_interp(self.A, 2, self.CN_A_dry, self.use_shannon, coord_points=(8, 12))
-        self.r_B_dry = get_radius_interp(self.B, 4, self.CN_B_dry, self.use_shannon, coord_points=(6, 8))
-        self.r_M_dry = get_radius_interp(self.M, 3, self.CN_M_dry, self.use_shannon, coord_points=(6, 8))
-        
-        # Lattice contribution in dry state (proportional to unit cell size)
-        self.L_dry = (self.r_A_dry + 
-                     (1 - self.x) * self.r_B_dry + 
-                     self.x * self.r_M_dry + 
-                     (3 - self.delta_dry) * self.r_O)
-    
-    def _calculate_hydrated_state(self):
-        """Calculate parameters for fully hydrated state (no vacancies, all protons)."""
-        # Coordination numbers in hydrated state (delta = 0)
-        self.CN_A_wet = 12
-        self.CN_B_wet = 6
-        self.CN_M_wet = 6
-        
-        # Ionic radii in hydrated state
-        self.r_A_wet = get_radius_interp(self.A, 2, self.CN_A_wet, self.use_shannon, coord_points=(8, 12))
-        self.r_B_wet = get_radius_interp(self.B, 4, self.CN_B_wet, self.use_shannon, coord_points=(6, 8))
-        self.r_M_wet = get_radius_interp(self.M, 3, self.CN_M_wet, self.use_shannon, coord_points=(6, 8))
-        
-        # Lattice contribution from cations only
-        self.L_cat_wet = self.r_A_wet + (1 - self.x) * self.r_B_wet + self.x * self.r_M_wet
-    
-    def calculate_effective_OH_radius(self) -> Dict[str, Any]:
+    def calculate_effective_oh_radius(self) -> Dict[str, Any]:
         """
         Calculate the effective radius of OH- group in the lattice.
-        
-        From experimental data, we have:
-        L_wet_exp = L_dry * (1 + beta_chem_exp * x)
-        
-        And theoretically:
-        L_wet = L_cat_wet + (3 - x) * r_O + x * r_OH_eff
-        
-        Therefore:
-        r_OH_eff = [L_dry * (1 + beta_chem_exp * x) - L_cat_wet - (3 - x) * r_O] / x
         """
-        # Experimental wet state lattice contribution
-        L_wet_exp = self.L_dry * (1 + self.beta_chem_exp * self.x)
-        
-        # Calculate effective OH radius
-        self.r_OH_eff = (L_wet_exp - self.L_cat_wet - (3 - self.x) * self.r_O) / self.x
+        self.r_OH_eff = self.radius_model.calculate_effective_oh_radius(self.beta_chem_exp)
         
         # Compare with tabulated value
         deviation_pct = (self.r_OH_eff - self.r_OH_table) / self.r_OH_table * 100
@@ -616,32 +920,18 @@ class InverseProblemSolver:
         result = {
             'r_OH_table': self.r_OH_table,
             'r_OH_eff': self.r_OH_eff,
-            'deviation_pct': deviation_pct,
-            'L_dry': self.L_dry,
-            'L_wet_exp': L_wet_exp,
-            'L_cat_wet': self.L_cat_wet
+            'deviation_pct': deviation_pct
         }
         self.results['oh_radius'] = result
         return result
     
-    def calculate_vacancy_radius(self) -> Dict[str, Any]:
+    def calculate_effective_vacancy_radius(self) -> Dict[str, Any]:
         """
         Calculate the effective radius of oxygen vacancy.
-        
-        In dry state: L_dry = L_cat_dry + (3 - delta_dry) * r_O + delta_dry * r_V_eff
-        
-        Therefore:
-        r_V_eff = [L_dry - L_cat_dry - (3 - delta_dry) * r_O] / delta_dry
         """
-        L_cat_dry = self.r_A_dry + (1 - self.x) * self.r_B_dry + self.x * self.r_M_dry
+        self.r_V_eff = self.radius_model.calculate_effective_vacancy_radius(self.beta_chem_exp)
         
-        # Calculate effective vacancy radius
-        if self.delta_dry > 0:
-            self.r_V_eff = (self.L_dry - L_cat_dry - (3 - self.delta_dry) * self.r_O) / self.delta_dry
-        else:
-            self.r_V_eff = self.r_O  # No vacancies, radius equals oxygen radius
-        
-        # Literature range for perovskites
+        # Literature range for perovskites (from Zuev et al.)
         lit_min, lit_max = 1.16, 1.24
         lit_ratio_min, lit_ratio_max = 0.92, 0.98
         
@@ -658,126 +948,47 @@ class InverseProblemSolver:
     
     def calculate_cation_radius_changes(self) -> Dict[str, Any]:
         """
-        Calculate the changes in cation radii upon hydration.
-        
-        The total change from dry to wet state is:
-        ΔL_total = L_dry * beta_chem_exp * x = ΔL_cat + x * (r_OH_eff - r_O) - (x/2) * (r_O - r_V_eff)
-        
-        Where ΔL_cat = (r_A_wet - r_A_dry) + (1-x)(r_B_wet - r_B_dry) + x(r_M_wet - r_M_dry)
+        Calculate the changes in cation radii upon full hydration.
         """
-        # Total change from experiment
-        delta_L_total = self.L_dry * self.beta_chem_exp * self.x
+        # Fully hydrated state (y = x)
+        hydrated_full = self.radius_model.calculate_hydrated_state(self.x)
         
-        # Contribution from anions (OH replacing O and V_O disappearing)
-        delta_L_anion = self.x * (self.r_OH_eff - self.r_O) - (self.x / 2) * (self.r_O - self.r_V_eff)
+        delta_r_A = hydrated_full['r_A_wet'] - self.r_A_dry
+        delta_r_B = hydrated_full['r_B_wet'] - self.r_B_dry
+        delta_r_M = hydrated_full['r_M_wet'] - self.r_M_dry
         
-        # Therefore, cation contribution
-        delta_L_cation = delta_L_total - delta_L_anion
-        
-        # Individual cation radius changes
-        delta_r_A = self.r_A_wet - self.r_A_dry
-        delta_r_B = self.r_B_wet - self.r_B_dry
-        delta_r_M = self.r_M_wet - self.r_M_dry
-        
-        # Sum should equal delta_L_cation
-        delta_r_sum = delta_r_A + (1 - self.x) * delta_r_B + self.x * delta_r_M
-        
-        # Calculate relative changes
         rel_delta_r_A = delta_r_A / self.r_A_dry * 100
         rel_delta_r_B = delta_r_B / self.r_B_dry * 100
         rel_delta_r_M = delta_r_M / self.r_M_dry * 100
         
         result = {
-            'delta_L_total': delta_L_total,
-            'delta_L_anion': delta_L_anion,
-            'delta_L_cation': delta_L_cation,
             'delta_r_A': delta_r_A,
             'delta_r_B': delta_r_B,
             'delta_r_M': delta_r_M,
             'rel_delta_r_A': rel_delta_r_A,
             'rel_delta_r_B': rel_delta_r_B,
             'rel_delta_r_M': rel_delta_r_M,
-            'delta_r_sum': delta_r_sum,
-            'consistency_check': abs(delta_r_sum - delta_L_cation) < 1e-6
+            'r_A_dry': self.r_A_dry,
+            'r_B_dry': self.r_B_dry,
+            'r_M_dry': self.r_M_dry,
+            'r_A_wet': hydrated_full['r_A_wet'],
+            'r_B_wet': hydrated_full['r_B_wet'],
+            'r_M_wet': hydrated_full['r_M_wet']
         }
         self.results['cation_changes'] = result
         return result
     
     def calculate_coordination_dependence_coeffs(self) -> Dict[str, Any]:
         """
-        Calculate the coefficients k_A and k_B that describe how radius changes with CN.
-        
-        From Zuev et al., Equation 36: r(CN) = a + m * CN
-        The coefficient k = m / r_base represents the fractional change per CN unit.
+        Calculate the coefficients k_A, k_B, k_M.
         """
-        # For A-site, interpolate between CN=8 and CN=12
-        r_A_8 = get_radius_interp(self.A, 2, 8, self.use_shannon, coord_points=(8, 12))
-        r_A_12 = get_radius_interp(self.A, 2, 12, self.use_shannon, coord_points=(8, 12))
-        
-        # Calculate slope m_A and base radius at CN=12
-        self.m_A = (r_A_12 - r_A_8) / 4  # Δr per unit CN
-        r_A_base = r_A_12
-        
-        # Experimental slope based on observed change
-        delta_CN_A = self.CN_A_wet - self.CN_A_dry
-        if abs(delta_CN_A) > 1e-6:
-            self.m_A_exp = (self.r_A_wet - self.r_A_dry) / delta_CN_A
-        else:
-            self.m_A_exp = self.m_A
-        
-        # For B-site, interpolate between CN=6 and CN=8
-        r_B_6 = get_radius_interp(self.B, 4, 6, self.use_shannon, coord_points=(6, 8))
-        r_B_8 = get_radius_interp(self.B, 4, 8, self.use_shannon, coord_points=(6, 8))
-        
-        self.m_B = (r_B_8 - r_B_6) / 2
-        r_B_base = r_B_6
-        
-        delta_CN_B = self.CN_B_wet - self.CN_B_dry
-        if abs(delta_CN_B) > 1e-6:
-            self.m_B_exp = (self.r_B_wet - self.r_B_dry) / delta_CN_B
-        else:
-            self.m_B_exp = self.m_B
-        
-        # For M-site (acceptor)
-        r_M_6 = get_radius_interp(self.M, 3, 6, self.use_shannon, coord_points=(6, 8))
-        r_M_8 = get_radius_interp(self.M, 3, 8, self.use_shannon, coord_points=(6, 8))
-        
-        self.m_M = (r_M_8 - r_M_6) / 2
-        r_M_base = r_M_6
-        
-        delta_CN_M = self.CN_M_wet - self.CN_M_dry
-        if abs(delta_CN_M) > 1e-6:
-            self.m_M_exp = (self.r_M_wet - self.r_M_dry) / delta_CN_M
-        else:
-            self.m_M_exp = self.m_M
-        
-        # Calculate coefficients k = m / r_base
-        self.k_A_theory = self.m_A / r_A_base
-        self.k_B_theory = self.m_B / r_B_base
-        self.k_M_theory = self.m_M / r_M_base
-        
-        self.k_A_exp = self.m_A_exp / r_A_base
-        self.k_B_exp = self.m_B_exp / r_B_base
-        self.k_M_exp = self.m_M_exp / r_M_base
-        
         result = {
-            'k_A_theory': self.k_A_theory,
-            'k_A_exp': self.k_A_exp,
-            'k_B_theory': self.k_B_theory,
-            'k_B_exp': self.k_B_exp,
-            'k_M_theory': self.k_M_theory,
-            'k_M_exp': self.k_M_exp,
-            'm_A_theory': self.m_A,
-            'm_A_exp': self.m_A_exp,
-            'm_B_theory': self.m_B,
-            'm_B_exp': self.m_B_exp,
-            'delta_CN_A': delta_CN_A,
-            'delta_CN_B': delta_CN_B,
-            'delta_CN_M': delta_CN_M,
-            'r_A_base': r_A_base,
-            'r_B_base': r_B_base,
-            'r_M_base': r_M_base,
-            # Add element symbols
+            'k_A': self.radius_model.k_A,
+            'k_B': self.radius_model.k_B,
+            'k_M': self.radius_model.k_M,
+            'r_A_base': self.radius_model.r_A_base,
+            'r_B_base': self.radius_model.r_B_base,
+            'r_M_base': self.radius_model.r_M_base,
             'A_element': self.A,
             'B_element': self.B,
             'M_element': self.M
@@ -785,26 +996,28 @@ class InverseProblemSolver:
         self.results['cn_coefficients'] = result
         return result
     
-    def calculate_association_energy(self) -> Dict[str, Any]:
+    def calculate_theoretical_beta_chem(self) -> Dict[str, Any]:
         """
-        Estimate defect association energy from temperature dependence of beta_chem.
+        Calculate theoretical beta_chem based on ionic radii model.
+        """
+        beta_chem_theory = self.radius_model.calculate_beta_chem_theoretical()
         
-        If beta_chem shows significant variation at low T, it may indicate defect association.
-        """
-        # This would require temperature-dependent beta_chem data
-        # For now, provide a placeholder
+        # Compare with experimental
+        deviation_pct = (beta_chem_theory - self.beta_chem_exp) / self.beta_chem_exp * 100
+        
         result = {
-            'estimated': False,
-            'message': 'Requires temperature-dependent beta_chem data from multi-temperature fits.'
+            'beta_chem_theory': beta_chem_theory,
+            'beta_chem_exp': self.beta_chem_exp,
+            'deviation_pct': deviation_pct
         }
-        self.results['association_energy'] = result
+        self.results['theoretical_beta'] = result
         return result
     
     def calculate_tolerance_factor(self) -> Dict[str, Any]:
         """
         Calculate Goldschmidt tolerance factor for the composition.
         
-        t = (r_A + r_O) / sqrt(2) * (r_B + r_O)
+        t = (r_A + r_O) / (sqrt(2) * (r_B + r_O))
         """
         r_A_12 = get_radius(self.A, 2, 12, self.use_shannon)
         r_B_6 = get_radius(self.B, 4, 6, self.use_shannon)
@@ -832,45 +1045,47 @@ class InverseProblemSolver:
         self.results['tolerance_factor'] = result
         return result
     
-    def calculate_theoretical_beta_chem(self) -> Dict[str, Any]:
+    def calculate_temperature_dependent_properties(self, T: np.ndarray, oh: np.ndarray) -> Dict[str, Any]:
         """
-        Calculate theoretical beta_chem based on ionic radii model.
-        
-        beta_chem_theory = [L_wet_theory - L_dry] / (L_dry * x)
-        where L_wet_theory uses tabulated radii.
+        Calculate temperature-dependent properties using the ionic radius model.
         """
-        L_wet_theory = (self.r_A_wet + 
-                       (1 - self.x) * self.r_B_wet + 
-                       self.x * self.r_M_wet + 
-                       (3 - self.x) * self.r_O + 
-                       self.x * self.r_OH_table)
+        # Get coordination numbers
+        cn_dict = self.radius_model.get_coordination_numbers_temperature(T, oh)
         
-        beta_chem_theory = (L_wet_theory - self.L_dry) / (self.L_dry * self.x)
+        # Get radius contributions
+        contrib_dict = self.radius_model.calculate_radius_contributions(T, oh)
         
-        # Compare with experimental
-        deviation_pct = (beta_chem_theory - self.beta_chem_exp) / self.beta_chem_exp * 100
-        
+        # Combine results
         result = {
-            'beta_chem_theory': beta_chem_theory,
-            'beta_chem_exp': self.beta_chem_exp,
-            'deviation_pct': deviation_pct,
-            'L_wet_theory': L_wet_theory,
-            'L_wet_exp': self.L_dry * (1 + self.beta_chem_exp * self.x)
+            'CN_A': cn_dict['CN_A'],
+            'CN_B': cn_dict['CN_B'],
+            'CN_M': cn_dict['CN_M'],
+            'r_A_curr': contrib_dict['r_A_curr'],
+            'r_B_curr': contrib_dict['r_B_curr'],
+            'r_M_curr': contrib_dict['r_M_curr'],
+            'delta_r_A': contrib_dict['delta_r_A'],
+            'delta_r_B': contrib_dict['delta_r_B'],
+            'delta_r_M': contrib_dict['delta_r_M'],
+            'delta_anion': contrib_dict['delta_anion'],
+            'chem_expansion_model': contrib_dict['chem_expansion']
         }
-        self.results['theoretical_beta'] = result
+        
+        self.results['temperature_properties'] = result
         return result
     
-    def run_all_calculations(self) -> Dict[str, Any]:
+    def run_all_calculations(self, T: Optional[np.ndarray] = None, oh: Optional[np.ndarray] = None) -> Dict[str, Any]:
         """
         Run all inverse problem calculations.
         """
-        self.calculate_effective_OH_radius()
-        self.calculate_vacancy_radius()
+        self.calculate_effective_oh_radius()
+        self.calculate_effective_vacancy_radius()
         self.calculate_cation_radius_changes()
         self.calculate_coordination_dependence_coeffs()
-        self.calculate_association_energy()
-        self.calculate_tolerance_factor()
         self.calculate_theoretical_beta_chem()
+        self.calculate_tolerance_factor()
+        
+        if T is not None and oh is not None:
+            self.calculate_temperature_dependent_properties(T, oh)
         
         # Add composition information to results
         self.results['A_element'] = self.A
@@ -881,7 +1096,7 @@ class InverseProblemSolver:
         return self.results
 
 # ============================================
-# INVERSE PROBLEM PLOTTING FUNCTIONS
+# INVERSE PROBLEM PLOTTING FUNCTIONS (UPDATED)
 # ============================================
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -972,45 +1187,35 @@ def create_inverse_plot1_cached(inverse_results: Dict[str, Any],
                     height + 0.1 if height > 0 else height - 0.2,
                     f'{val:.2f}', ha='center', va='bottom' if height > 0 else 'top',
                     fontweight='bold')
-        
-        # Add total
-        total_delta = cation_res.get('delta_L_cation', 0) * 1000
-        ax3.text(0.5, 0.95, f'Total ΔL_cation = {total_delta:.2f} ×10⁻³',
-                transform=ax3.transAxes, ha='center', va='top',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
     # Plot 4: Coordination dependence coefficients
     if cn_res:
         sites = ['A-site', 'B-site', 'M-site']
-        k_theory = [cn_res.get('k_A_theory', 0) * 1000,
-                    cn_res.get('k_B_theory', 0) * 1000,
-                    cn_res.get('k_M_theory', 0) * 1000]
-        k_exp = [cn_res.get('k_A_exp', 0) * 1000,
-                 cn_res.get('k_B_exp', 0) * 1000,
-                 cn_res.get('k_M_exp', 0) * 1000]
+        k_values = [cn_res.get('k_A', 0) * 1000,
+                    cn_res.get('k_B', 0) * 1000,
+                    cn_res.get('k_M', 0) * 1000]
         
-        x = np.arange(len(sites))
-        width = 0.35
+        colors = [style.get('thermal_line_color', '#1f77b4'),
+                  style.get('model_line_color', '#000000'),
+                  style.get('chemical_line_color', '#d62728')]
         
-        bars1 = ax4.bar(x - width/2, k_theory, width, label='Theoretical',
-                        color=style.get('thermal_line_color', '#1f77b4'),
-                        alpha=0.7, edgecolor='black')
-        bars2 = ax4.bar(x + width/2, k_exp, width, label='Experimental',
-                        color=style.get('chemical_line_color', '#d62728'),
-                        alpha=0.7, edgecolor='black')
-        
+        bars = ax4.bar(sites, k_values, color=colors, alpha=0.7, edgecolor='black')
         ax4.set_ylabel('k × 10³ (Δr/r per CN)', fontweight='bold')
         ax4.set_xlabel('Cation Site', fontweight='bold')
         ax4.set_title('Coordination Dependence Coefficients', fontweight='bold')
-        ax4.set_xticks(x)
-        ax4.set_xticklabels(sites)
-        ax4.legend(loc='upper right')
         ax4.axhline(y=0, color='gray', linestyle='-', alpha=0.3)
+        
+        # Add value labels
+        for bar, val in zip(bars, k_values):
+            height = bar.get_height()
+            ax4.text(bar.get_x() + bar.get_width()/2., height + 0.1,
+                    f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
     
     plt.suptitle(f'Ionic Radii Analysis: {composition}', fontweight='bold', fontsize=14)
     plt.tight_layout()
     fig.set_dpi(600)
     return fig
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
@@ -1024,6 +1229,7 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
     
     theo_res = inverse_results.get('theoretical_beta', {})
     tol_res = inverse_results.get('tolerance_factor', {})
+    vac_res = inverse_results.get('vacancy_radius', {})
     
     # Plot 1: Beta chemical comparison
     if theo_res:
@@ -1047,25 +1253,30 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
                 transform=ax1.transAxes, ha='center', va='top',
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
-    # Plot 2: Lattice contributions
-    if theo_res:
-        L_dry = theo_res.get('L_dry', 0)
-        categories = ['Dry state', 'Hydrated (theory)', 'Hydrated (exp)']
-        values = [L_dry,
-                  theo_res.get('L_wet_theory', 0),
-                  theo_res.get('L_wet_exp', 0)]
+    # Plot 2: Comparison with literature (Vacancy radius)
+    if vac_res:
+        r_V = vac_res.get('r_V_eff', 0)
+        lit_min, lit_max = vac_res.get('literature_range', (1.16, 1.24))
         
-        bars = ax2.bar(categories, values, color=[style.get('thermal_line_color', '#1f77b4'),
-                                                   style.get('model_line_color', '#000000'),
-                                                   style.get('point_color', '#1f77b4')],
-                       alpha=0.7, edgecolor='black')
-        ax2.set_ylabel('Lattice Contribution (Å)', fontweight='bold')
-        ax2.set_title('Lattice Sum (Σ r_i)', fontweight='bold')
+        categories = ['Literature min', 'This work', 'Literature max']
+        values = [lit_min, r_V, lit_max]
+        colors = ['gray', style.get('chemical_line_color', '#d62728'), 'gray']
+        
+        bars = ax2.bar(categories, values, color=colors, alpha=0.7, edgecolor='black')
+        ax2.set_ylabel('r_V_O (Å)', fontweight='bold')
+        ax2.set_title('Vacancy Radius: Comparison with Literature', fontweight='bold')
         
         for bar, val in zip(bars, values):
             height = bar.get_height()
             ax2.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                    f'{val:.3f} Å', ha='center', va='bottom', fontweight='bold', fontsize=8)
+                    f'{val:.3f} Å', ha='center', va='bottom', fontweight='bold')
+        
+        within = vac_res.get('within_literature', False)
+        status = "✓ Within literature range" if within else "✗ Outside literature range"
+        ax2.text(0.5, 0.95, status,
+                transform=ax2.transAxes, ha='center', va='top',
+                color='green' if within else 'red', fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
     # Plot 3: Tolerance factor visualization
     if tol_res:
@@ -1095,103 +1306,116 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
                 transform=ax3.transAxes, fontsize=9,
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
-    # Plot 4: Comparison with literature
-    vac_res = inverse_results.get('vacancy_radius', {})
-    if vac_res:
-        r_V = vac_res.get('r_V_eff', 0)
-        lit_min, lit_max = vac_res.get('literature_range', (1.16, 1.24))
+    # Plot 4: Beta theory vs experiment scatter (with reference line)
+    if theo_res:
+        x_vals = [theo_res.get('beta_chem_exp', 0) * 1000]
+        y_vals = [theo_res.get('beta_chem_theory', 0) * 1000]
         
-        categories = ['Literature min', 'This work', 'Literature max']
-        values = [lit_min, r_V, lit_max]
-        colors = ['gray', style.get('chemical_line_color', '#d62728'), 'gray']
+        ax4.scatter(x_vals, y_vals, s=100, c=style.get('point_color', '#1f77b4'),
+                   edgecolor='black', alpha=0.8, zorder=5)
         
-        bars = ax4.bar(categories, values, color=colors, alpha=0.7, edgecolor='black')
-        ax4.set_ylabel('r_V_O (Å)', fontweight='bold')
-        ax4.set_title('Vacancy Radius: Comparison with Literature', fontweight='bold')
+        # Add diagonal line (perfect agreement)
+        min_val = min(x_vals + y_vals) * 0.9
+        max_val = max(x_vals + y_vals) * 1.1
+        ax4.plot([min_val, max_val], [min_val, max_val], 'r--', 
+                linewidth=1.5, alpha=0.7, label='Perfect agreement')
         
-        for bar, val in zip(bars, values):
-            height = bar.get_height()
-            ax4.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                    f'{val:.3f} Å', ha='center', va='bottom', fontweight='bold')
+        ax4.set_xlabel('Experimental β × 10³', fontweight='bold')
+        ax4.set_ylabel('Theoretical β × 10³', fontweight='bold')
+        ax4.set_title('Theory vs Experiment', fontweight='bold')
+        ax4.legend(loc='best')
+        ax4.grid(True, alpha=0.3, linestyle='--')
         
-        within = vac_res.get('within_literature', False)
-        status = "✓ Within literature range" if within else "✗ Outside literature range"
-        ax4.text(0.5, 0.95, status,
-                transform=ax4.transAxes, ha='center', va='top',
-                color='green' if within else 'red', fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        # Add point label
+        ax4.annotate(f'({x_vals[0]:.2f}, {y_vals[0]:.2f})',
+                    (x_vals[0], y_vals[0]),
+                    xytext=(5, 5), textcoords='offset points',
+                    fontsize=9, fontweight='bold')
     
     plt.suptitle(f'Defect Parameters: {composition}', fontweight='bold', fontsize=14)
     plt.tight_layout()
     fig.set_dpi(600)
     return fig
 
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def create_inverse_plot3_cached(inverse_results: Dict[str, Any],
                                 composition: str,
-                                style: Dict[str, Any]) -> plt.Figure:
+                                style: Dict[str, Any],
+                                T: Optional[np.ndarray] = None) -> plt.Figure:
     """
-    Create plot 15: Structural insights and correlations
+    Create plot 15: Temperature-dependent properties and contributions
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 8))
     
-    # Get the actual element symbols from the results
-    # They should be stored in the results dictionary
-    A_element = inverse_results.get('A_element', 'Ba')
-    B_element = inverse_results.get('B_element', 'Zr')
-    M_element = inverse_results.get('M_element', 'Y')
+    temp_props = inverse_results.get('temperature_properties', {})
+    cation_res = inverse_results.get('cation_changes', {})
+    cn_res = inverse_results.get('cn_coefficients', {})
+    
+    A_element = inverse_results.get('A_element', 'A')
+    B_element = inverse_results.get('B_element', 'B')
+    M_element = inverse_results.get('M_element', 'M')
     x_value = inverse_results.get('x', 0.1)
     
-    cn_res = inverse_results.get('cn_coefficients', {})
-    cation_res = inverse_results.get('cation_changes', {})
-    
-    # Plot 1: Radius vs Coordination Number
-    if cn_res:
-        # A-site
-        cn_range = np.linspace(6, 12, 50)
-        r_A = [get_radius_interp(A_element, 2, cn, False, coord_points=(8, 12)) 
-               for cn in cn_range]
-        ax1.plot(cn_range, r_A, '-', color=style.get('thermal_line_color', '#1f77b4'),
+    # Plot 1: Coordination Numbers vs Temperature
+    if temp_props and 'CN_A' in temp_props and len(temp_props['CN_A']) > 0:
+        # We need T data - if not provided, create a dummy range
+        if T is None or len(T) == 0:
+            T_dummy = np.linspace(0, 800, 100)
+        else:
+            T_dummy = T
+        
+        # Get CN data - if lengths don't match, interpolate
+        CN_A = temp_props.get('CN_A', np.ones_like(T_dummy) * 12)
+        CN_B = temp_props.get('CN_B', np.ones_like(T_dummy) * 6)
+        CN_M = temp_props.get('CN_M', np.ones_like(T_dummy) * 6)
+        
+        ax1.plot(T_dummy, CN_A, '-', color=style.get('thermal_line_color', '#1f77b4'),
                 linewidth=2, label=f'A-site ({A_element})')
-        
-        # B-site
-        cn_range_b = np.linspace(4, 8, 50)
-        r_B = [get_radius_interp(B_element, 4, cn, False, coord_points=(6, 8)) 
-               for cn in cn_range_b]
-        ax1.plot(cn_range_b, r_B, '-', color=style.get('chemical_line_color', '#d62728'),
+        ax1.plot(T_dummy, CN_B, '-', color=style.get('chemical_line_color', '#d62728'),
                 linewidth=2, label=f'B-site ({B_element})')
-        
-        # M-site
-        r_M = [get_radius_interp(M_element, 3, cn, False, coord_points=(6, 8)) 
-               for cn in cn_range_b]
-        ax1.plot(cn_range_b, r_M, '--', color=style.get('model_line_color', '#000000'),
+        ax1.plot(T_dummy, CN_M, '--', color=style.get('model_line_color', '#000000'),
                 linewidth=2, label=f'M-site ({M_element})')
         
-        # Mark experimental points if available
-        if 'CN_A_dry' in cn_res and 'r_A_dry' in cn_res:
-            ax1.plot(cn_res.get('CN_A_dry', 0), cn_res.get('r_A_dry', 0), 'o',
-                    color=style.get('point_color', '#1f77b4'), markersize=8,
-                    markeredgecolor='black', label='Dry state')
-        if 'CN_A_wet' in cn_res and 'r_A_wet' in cn_res:
-            ax1.plot(cn_res.get('CN_A_wet', 0), cn_res.get('r_A_wet', 0), 's',
-                    color=style.get('point_color', '#1f77b4'), markersize=8,
-                    markeredgecolor='black', label='Hydrated state')
-        
-        ax1.set_xlabel('Coordination Number', fontweight='bold')
-        ax1.set_ylabel('Ionic Radius (Å)', fontweight='bold')
-        ax1.set_title('Radius Dependence on Coordination Number', fontweight='bold')
+        ax1.set_xlabel('Temperature (°C)', fontweight='bold')
+        ax1.set_ylabel('Coordination Number', fontweight='bold')
+        ax1.set_title('Coordination Numbers vs Temperature', fontweight='bold')
         ax1.legend(loc='best')
-        ax1.grid(True, alpha=0.3)
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        ax1.set_ylim(4, 13)
     
-    # Plot 2: Radial distribution
+    # Plot 2: Cation radius changes vs Temperature
+    if temp_props and 'delta_r_A' in temp_props and len(temp_props['delta_r_A']) > 0:
+        if T is None or len(T) == 0:
+            T_dummy = np.linspace(0, 800, 100)
+        else:
+            T_dummy = T
+        
+        delta_r_A = temp_props.get('delta_r_A', np.zeros_like(T_dummy)) * 1000
+        delta_r_B = temp_props.get('delta_r_B', np.zeros_like(T_dummy)) * 1000
+        delta_r_M = temp_props.get('delta_r_M', np.zeros_like(T_dummy)) * 1000
+        
+        ax2.plot(T_dummy, delta_r_A, '-', color=style.get('thermal_line_color', '#1f77b4'),
+                linewidth=2, label=f'A-site ({A_element})')
+        ax2.plot(T_dummy, delta_r_B, '-', color=style.get('chemical_line_color', '#d62728'),
+                linewidth=2, label=f'B-site ({B_element})')
+        ax2.plot(T_dummy, delta_r_M, '--', color=style.get('model_line_color', '#000000'),
+                linewidth=2, label=f'M-site ({M_element})')
+        
+        ax2.set_xlabel('Temperature (°C)', fontweight='bold')
+        ax2.set_ylabel('Δr (10⁻³ Å)', fontweight='bold')
+        ax2.set_title('Cation Radius Change vs Temperature', fontweight='bold')
+        ax2.legend(loc='best')
+        ax2.grid(True, alpha=0.3, linestyle='--')
+    
+    # Plot 3: Contribution pie chart
     if cation_res:
-        # Create a pie chart of contributions
+        # Create a pie chart of contributions at full hydration
         labels = [f'A-site ({A_element})', f'B-site ({B_element})', 
-                  f'M-site ({M_element})', 'Oxygen/Anions']
+                  f'M-site ({M_element})']
         sizes = [abs(cation_res.get('delta_r_A', 0)),
                  abs((1 - x_value) * cation_res.get('delta_r_B', 0)),
-                 abs(x_value * cation_res.get('delta_r_M', 0)),
-                 abs(cation_res.get('delta_L_anion', 0))]
+                 abs(x_value * cation_res.get('delta_r_M', 0))]
         
         # Filter out zero values
         non_zero = [(l, s) for l, s in zip(labels, sizes) if s > 1e-10]
@@ -1200,27 +1424,50 @@ def create_inverse_plot3_cached(inverse_results: Dict[str, Any],
             
             colors = [style.get('thermal_line_color', '#1f77b4'),
                       style.get('chemical_line_color', '#d62728'),
-                      style.get('model_line_color', '#000000'),
-                      'gray']
-            # Use only as many colors as we have non-zero sizes
+                      style.get('model_line_color', '#000000')]
             colors = colors[:len(labels)]
             
-            wedges, texts, autotexts = ax2.pie(sizes, labels=labels, colors=colors,
+            wedges, texts, autotexts = ax3.pie(sizes, labels=labels, colors=colors,
                                                autopct='%1.1f%%', startangle=90,
                                                wedgeprops={'edgecolor': 'black', 'linewidth': 1})
             for autotext in autotexts:
                 autotext.set_color('white')
                 autotext.set_fontweight('bold')
         else:
-            ax2.text(0.5, 0.5, 'No significant\ncontributions', 
-                    ha='center', va='center', transform=ax2.transAxes)
+            ax3.text(0.5, 0.5, 'No significant\ncontributions', 
+                    ha='center', va='center', transform=ax3.transAxes)
         
-        ax2.set_title('Contribution to Chemical Expansion', fontweight='bold')
+        ax3.set_title('Cation Contributions to Chemical Expansion', fontweight='bold')
     
-    plt.suptitle(f'Structural Insights: {composition}', fontweight='bold', fontsize=14)
+    # Plot 4: Chemical expansion comparison
+    if temp_props and 'chem_expansion_model' in temp_props and len(temp_props['chem_expansion_model']) > 0:
+        if T is None or len(T) == 0:
+            T_dummy = np.linspace(0, 800, 100)
+            chem_model = temp_props.get('chem_expansion_model', np.zeros_like(T_dummy))
+        else:
+            T_dummy = T
+            chem_model = temp_props.get('chem_expansion_model', np.zeros_like(T_dummy))
+        
+        ax4.plot(T_dummy, chem_model * 100, '-', color=style.get('model_line_color', '#000000'),
+                linewidth=2, label='Model (ionic radii)')
+        
+        # If we have experimental chemical expansion from fit_results
+        if 'chem_contrib' in inverse_results:
+            chem_exp = inverse_results.get('chem_contrib', np.zeros_like(T_dummy))
+            ax4.plot(T_dummy, chem_exp * 100, '--', color=style.get('point_color', '#1f77b4'),
+                    linewidth=2, label='Experimental')
+        
+        ax4.set_xlabel('Temperature (°C)', fontweight='bold')
+        ax4.set_ylabel('Chemical Expansion (%)', fontweight='bold')
+        ax4.set_title('Chemical Expansion: Model vs Experiment', fontweight='bold')
+        ax4.legend(loc='best')
+        ax4.grid(True, alpha=0.3, linestyle='--')
+    
+    plt.suptitle(f'Temperature-Dependent Properties: {composition}', fontweight='bold', fontsize=14)
     plt.tight_layout()
     fig.set_dpi(600)
     return fig
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def create_inverse_report_cached(inverse_results: Dict[str, Any],
@@ -1255,6 +1502,20 @@ def create_inverse_report_cached(inverse_results: Dict[str, Any],
     report.append(f"Water vapor pressure pH₂O = {params.get('pH2O', 0):.4f} atm")
     report.append("")
     
+    # Ionic radius model parameters
+    cn_res = inverse_results.get('cn_coefficients', {})
+    if cn_res:
+        report.append("-" * 40)
+        report.append("IONIC RADIUS MODEL PARAMETERS")
+        report.append("-" * 40)
+        report.append(f"k_A (A-site sensitivity) = {cn_res.get('k_A', 0)*1000:.3f} ×10⁻³ Å/CN")
+        report.append(f"k_B (B-site sensitivity) = {cn_res.get('k_B', 0)*1000:.3f} ×10⁻³ Å/CN")
+        report.append(f"k_M (M-site sensitivity) = {cn_res.get('k_M', 0)*1000:.3f} ×10⁻³ Å/CN")
+        report.append(f"r_A_base (CN=12) = {cn_res.get('r_A_base', 0):.4f} Å")
+        report.append(f"r_B_base (CN=6) = {cn_res.get('r_B_base', 0):.4f} Å")
+        report.append(f"r_M_base (CN=6) = {cn_res.get('r_M_base', 0):.4f} Å")
+        report.append("")
+    
     # OH- radius
     oh_res = inverse_results.get('oh_radius', {})
     if oh_res:
@@ -1287,23 +1548,15 @@ def create_inverse_report_cached(inverse_results: Dict[str, Any],
         report.append("-" * 40)
         report.append("CATION RADIUS CHANGES UPON HYDRATION")
         report.append("-" * 40)
-        report.append(f"A-site ({A_element}) change: {cat_res.get('delta_r_A', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_A', 0):+.2f}%)")
-        report.append(f"B-site ({B_element}) change: {cat_res.get('delta_r_B', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_B', 0):+.2f}%)")
-        report.append(f"M-site ({M_element}) change: {cat_res.get('delta_r_M', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_M', 0):+.2f}%)")
-        report.append(f"Total cation contribution: {cat_res.get('delta_L_cation', 0)*1000:.3f} ×10⁻³ Å")
-        report.append(f"Total anion contribution: {cat_res.get('delta_L_anion', 0)*1000:.3f} ×10⁻³ Å")
-        report.append(f"Consistency check: {cat_res.get('consistency_check', False)}")
-        report.append("")
-    
-    # Coordination dependence
-    cn_res = inverse_results.get('cn_coefficients', {})
-    if cn_res:
-        report.append("-" * 40)
-        report.append("COORDINATION DEPENDENCE COEFFICIENTS")
-        report.append("-" * 40)
-        report.append(f"A-site: k_theory = {cn_res.get('k_A_theory', 0)*1000:.3f} ×10⁻³, k_exp = {cn_res.get('k_A_exp', 0)*1000:.3f} ×10⁻³")
-        report.append(f"B-site: k_theory = {cn_res.get('k_B_theory', 0)*1000:.3f} ×10⁻³, k_exp = {cn_res.get('k_B_exp', 0)*1000:.3f} ×10⁻³")
-        report.append(f"M-site: k_theory = {cn_res.get('k_M_theory', 0)*1000:.3f} ×10⁻³, k_exp = {cn_res.get('k_M_exp', 0)*1000:.3f} ×10⁻³")
+        report.append(f"A-site ({A_element}):")
+        report.append(f"  Dry: {cat_res.get('r_A_dry', 0):.4f} Å, Wet: {cat_res.get('r_A_wet', 0):.4f} Å")
+        report.append(f"  Change: {cat_res.get('delta_r_A', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_A', 0):+.2f}%)")
+        report.append(f"B-site ({B_element}):")
+        report.append(f"  Dry: {cat_res.get('r_B_dry', 0):.4f} Å, Wet: {cat_res.get('r_B_wet', 0):.4f} Å")
+        report.append(f"  Change: {cat_res.get('delta_r_B', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_B', 0):+.2f}%)")
+        report.append(f"M-site ({M_element}):")
+        report.append(f"  Dry: {cat_res.get('r_M_dry', 0):.4f} Å, Wet: {cat_res.get('r_M_wet', 0):.4f} Å")
+        report.append(f"  Change: {cat_res.get('delta_r_M', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_M', 0):+.2f}%)")
         report.append("")
     
     # Theoretical beta
@@ -1365,16 +1618,58 @@ def parse_data_cached(data_string: str) -> np.ndarray:
     
     return np.array(data)
 
+# UPDATED: Replace old calculate_oh_cached with new accurate version
 @st.cache_data(ttl=3600, show_spinner=False)
 def calculate_oh_cached(T: np.ndarray, Acc: float, dH: float, dS: float, pH2O: float) -> Tuple[np.ndarray, np.ndarray]:
-    """Calculate [OH] for given temperatures (cached)"""
+    """
+    Calculate [OH] for given temperatures using the accurate analytical expression.
+    
+    Parameters:
+    -----------
+    T : np.ndarray
+        Temperature in Celsius
+    Acc : float
+        Acceptor concentration
+    dH : float
+        Enthalpy of hydration (kJ/mol)
+    dS : float
+        Entropy of hydration (J/mol·K)
+    pH2O : float
+        Water vapor pressure (atm)
+    
+    Returns:
+    --------
+    Tuple[np.ndarray, np.ndarray]
+        [OH] concentration and equilibrium constant Kw
+    """
     T_K = T + 273.15
     R = 8.314
-    Khydr = np.exp(-dH * 1000 / (R * T_K) + dS / R)
     
-    A = Khydr * pH2O
-    oh = -A/2 + np.sqrt(A * Acc + (A/2)**2)
-    return oh, Khydr
+    # Calculate equilibrium constant
+    Kw = np.exp(-dH * 1000 / (R * T_K) + dS / R)
+    
+    # Calculate the term under the square root
+    sqrt_term = Kw * pH2O * (9 * Kw * pH2O - 6 * Kw * pH2O * Acc + Kw * pH2O * Acc**2 + 24 * Acc - 4 * Acc**2)
+    
+    # Ensure sqrt_term is non-negative (numerical stability)
+    sqrt_term = np.maximum(sqrt_term, 0)
+    
+    # Calculate denominator
+    denominator = Kw * pH2O - 4
+    
+    # Handle denominator near zero (numerical stability)
+    denominator = np.where(np.abs(denominator) < 1e-10, 1e-10, denominator)
+    
+    # Calculate numerator
+    numerator = 3 * Kw * pH2O - np.sqrt(sqrt_term)
+    
+    # Calculate [OH]
+    oh = numerator / denominator
+    
+    # Ensure [OH] is between 0 and Acc
+    oh = np.clip(oh, 0, Acc)
+    
+    return oh, Kw
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def calculate_tec_cached(T: np.ndarray, dl: np.ndarray) -> np.ndarray:
@@ -1395,7 +1690,37 @@ def calculate_tec_cached(T: np.ndarray, dl: np.ndarray) -> np.ndarray:
 def model_func_cached(T: np.ndarray, Acc: float, alpha_1e6: float, beta: float, 
                      dH: float, dS: float, pH2O: float, residue: float, 
                      T_start: float, oh_start: float) -> np.ndarray:
-    """Model function for fitting (cached calculation)"""
+    """
+    Model function for fitting using accurate [OH] calculation.
+    
+    Parameters:
+    -----------
+    T : np.ndarray
+        Temperature in Celsius
+    Acc : float
+        Acceptor concentration
+    alpha_1e6 : float
+        Thermal expansion coefficient (×10⁶)
+    beta : float
+        Chemical expansion coefficient
+    dH : float
+        Enthalpy of hydration (kJ/mol)
+    dS : float
+        Entropy of hydration (J/mol·K)
+    pH2O : float
+        Water vapor pressure (atm)
+    residue : float
+        Constant offset
+    T_start : float
+        Starting temperature
+    oh_start : float
+        [OH] concentration at starting temperature
+    
+    Returns:
+    --------
+    np.ndarray
+        Modeled ΔL/L₀ values
+    """
     oh, _ = calculate_oh_cached(T, Acc, dH, dS, pH2O)
     dl_dl0 = (alpha_1e6/1e6) * (T - T_start) + beta * (oh - oh_start) + residue
     return dl_dl0
@@ -1488,7 +1813,7 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
         tec_exp = calculate_tec_cached(T_data, dl_data)
         tec_model = calculate_tec_cached(T_data, dl_model)
         
-        # Calculate proton concentration
+        # Calculate proton concentration using accurate formula
         oh, _ = calculate_oh_cached(T_data, result_params['Acc'], result_params['dH'], 
                                   result_params['dS'], result_params['pH2O'])
         
@@ -2427,7 +2752,7 @@ def main():
                         if st.session_state.experimental_data is None:
                             st.error("Please load data first!")
                         else:
-                            # Обновление параметров
+                            # Update parameters
                             param_updates = [
                                 ('Acc', acc_value, acc_fixed),
                                 ('alpha_1e6', alpha_value, alpha_fixed),
@@ -2493,7 +2818,7 @@ def main():
                                             fitted_value = st.session_state.fit_results['params'][param_name]
                                             st.session_state.model_params[param_name]['value'] = fitted_value
                                     
-                                    # Обновляем timestamp для принудительного обновления формы
+                                    # Update timestamp to force form refresh
                                     st.session_state.fit_timestamp += 1
                                     
                                     st.success(f"✅ Fitting completed in {end_time - start_time:.2f} seconds")
@@ -2558,11 +2883,21 @@ def main():
                                 fit_results=st.session_state.fit_results,
                                 use_shannon=use_shannon
                             )
-                            st.session_state.inverse_results = solver.run_all_calculations()
+                            # Pass temperature data for temperature-dependent properties
+                            T_data = st.session_state.fit_results['T_data']
+                            oh_data = st.session_state.fit_results['oh_concentration']
+                            st.session_state.inverse_results = solver.run_all_calculations(T_data, oh_data)
                             st.session_state.inverse_complete = True
                             st.session_state.current_stage = 2
                             st.success("✅ Inverse analysis completed")
                             st.rerun()
+        
+        # Return to Stage 1 button (always visible when in Stage 2)
+        if st.session_state.current_stage == 2 and st.session_state.inverse_complete:
+            st.markdown("---")
+            if st.button("🔙 Return to Stage 1 (Fitting)", type="primary", use_container_width=True, key="return_to_stage1"):
+                st.session_state.current_stage = 1
+                st.rerun()
         
         # Plot Settings
         with st.expander("🎨 **Plot Settings**", expanded=False):
@@ -2845,21 +3180,21 @@ Fixed parameters: {', '.join([k for k, v in st.session_state.fit_results['fixed_
         plot15 = create_inverse_plot3_cached(
             st.session_state.inverse_results,
             composition,
-            st.session_state.plot_style
+            st.session_state.plot_style,
+            st.session_state.fit_results['T_data'] if st.session_state.fit_results is not None else None
         )
         
         # Display inverse plots
         tab1, tab2, tab3, tab4 = st.tabs([
             "🔬 Ionic Radii Analysis",
             "⚛️ Defect Parameters",
-            "📐 Structural Insights",
+            "📐 Temperature-Dependent Properties",
             "📄 Report"
         ])
         
         with tab1:
             st.pyplot(plot13)
             
-            # Add detailed explanations
             st.markdown("""
             <div class="info-box">
             <h4>📌 Ionic Radii Analysis</h4>
@@ -2867,7 +3202,7 @@ Fixed parameters: {', '.join([k for k, v in st.session_state.fit_results['fixed_
                 <li><b>OH⁻ Radius:</b> Comparison between tabulated value and effective radius in the lattice. Deviation indicates lattice relaxation effects.</li>
                 <li><b>Vacancy Radius:</b> Effective radius of oxygen vacancy calculated from dry state. Literature range for perovskites: 1.16-1.24 Å.</li>
                 <li><b>Cation Changes:</b> Change in cation radii upon hydration due to coordination number change.</li>
-                <li><b>Coordination Dependence:</b> Coefficients k = (Δr/r)/ΔCN showing how strongly radius depends on coordination.</li>
+                <li><b>Coordination Dependence:</b> Coefficients k = dr/dCN showing how strongly radius depends on coordination.</li>
             </ul>
             </div>
             """, unsafe_allow_html=True)
@@ -2880,9 +3215,9 @@ Fixed parameters: {', '.join([k for k, v in st.session_state.fit_results['fixed_
             <h4>📌 Defect Parameters</h4>
             <ul>
                 <li><b>β Comparison:</b> Experimental vs theoretical chemical expansion coefficient. Deviation indicates limitations of simple ionic model.</li>
-                <li><b>Lattice Sum:</b> Total contribution of ionic radii to unit cell size in different states.</li>
+                <li><b>Vacancy Radius Literature:</b> Comparison with literature values for oxygen vacancy radius.</li>
                 <li><b>Tolerance Factor:</b> Goldschmidt factor indicating perovskite stability.</li>
-                <li><b>Literature Comparison:</b> How our calculated vacancy radius compares with literature values.</li>
+                <li><b>Theory vs Experiment:</b> Correlation between theoretical and experimental β values.</li>
             </ul>
             </div>
             """, unsafe_allow_html=True)
@@ -2892,11 +3227,12 @@ Fixed parameters: {', '.join([k for k, v in st.session_state.fit_results['fixed_
             
             st.markdown("""
             <div class="info-box">
-            <h4>📌 Structural Insights</h4>
+            <h4>📌 Temperature-Dependent Properties</h4>
             <ul>
-                <li><b>Radius vs Coordination:</b> Shows how ionic radius changes with coordination number for each site.</li>
-                <li><b>Contribution Pie:</b> Relative contributions of different ions to total chemical expansion.</li>
-                <li>Markers show dry and hydrated states for each cation.</li>
+                <li><b>Coordination Numbers vs T:</b> How CN changes with temperature due to hydration/dehydration.</li>
+                <li><b>Cation Radius Changes vs T:</b> Evolution of cation radii with temperature.</li>
+                <li><b>Contribution Pie:</b> Relative contributions of different cations to total chemical expansion.</li>
+                <li><b>Chemical Expansion Model:</b> Comparison of ionic radii model with experimental chemical expansion.</li>
             </ul>
             </div>
             """, unsafe_allow_html=True)
@@ -2929,13 +3265,13 @@ Fixed parameters: {', '.join([k for k, v in st.session_state.fit_results['fixed_
                     
                     zip_buffer = BytesIO()
                     with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED) as zf:
-                        for i, (plot_func, name) in enumerate([
-                            (create_inverse_plot1_cached, 'ionic_radii'),
-                            (create_inverse_plot2_cached, 'defect_params'),
-                            (create_inverse_plot3_cached, 'structural_insights')
+                        for i, (plot_func, name, args) in enumerate([
+                            (create_inverse_plot1_cached, 'ionic_radii', [st.session_state.inverse_results, composition, st.session_state.plot_style]),
+                            (create_inverse_plot2_cached, 'defect_params', [st.session_state.inverse_results, composition, st.session_state.plot_style, st.session_state.composition['A'], st.session_state.composition['B'], st.session_state.composition['M']]),
+                            (create_inverse_plot3_cached, 'temperature_props', [st.session_state.inverse_results, composition, st.session_state.plot_style, st.session_state.fit_results['T_data'] if st.session_state.fit_results is not None else None])
                         ]):
                             try:
-                                fig = plot_func(st.session_state.inverse_results, composition, st.session_state.plot_style)
+                                fig = plot_func(*args)
                                 img_buf = BytesIO()
                                 fig.savefig(img_buf, format='png', dpi=600)
                                 img_buf.seek(0)
