@@ -483,7 +483,7 @@ def validate_composition(A: str, B: str, M: str, x: float) -> Tuple[bool, str]:
         return False, f"M-site element '{M}' not allowed. Choose from {', '.join(allowed_M)}."
     
     if x <= 0 or x >= 1:
-        return False, f"x must be between 0 and 1 (exclusive). Current value: {x}"
+        return False, f"x must be between 0.01 and 0.99. Current value: {x}"
     
     return True, ""
 
