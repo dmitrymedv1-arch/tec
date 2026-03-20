@@ -50,7 +50,7 @@ plt.rcParams.update({
 })
 
 # Page configuration
-st.set_page_page_config(
+st.set_page_config(
     page_title="Thermo-Mechanical Expansion Modeling Suite",
     page_icon="🔬",
     layout="wide",
