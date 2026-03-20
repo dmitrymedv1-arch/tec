@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional, Tuple, List
 import time
 from scipy.stats import norm, probplot
 from statsmodels.graphics.tsaplots import plot_acf
-from scipy.misc import derivative
+from scipy.optimize import derivative
 from datetime import datetime
 import json
 import base64
