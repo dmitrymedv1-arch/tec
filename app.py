@@ -1149,7 +1149,7 @@ def main():
                 if st.session_state.experimental_data is None:
                     st.error("Please load data first!")
                 else:
-                    # Обновляем значения параметров в session state
+                    # Обновляем значения параметров в session state из формы
                     param_updates = [
                         ('Acc', acc_value, acc_fixed),
                         ('alpha_1e6', alpha_value, alpha_fixed),
@@ -1213,7 +1213,17 @@ def main():
                                 'fixed_params': fixed_params,
                                 'initial_guess': initial_guess
                             }
+                            
+                            # !!! НОВЫЙ КОД: Обновляем параметры в session state значениями из фиттинга
+                            # для параметров, которые не были зафиксированы
+                            for param_name in ['Acc', 'alpha_1e6', 'beta', 'dH', 'dS', 'pH2O', 'residue']:
+                                # Если параметр не был зафиксирован (т.е. подгонялся), обновляем его значение
+                                if not st.session_state.model_params[param_name]['fixed']:
+                                    fitted_value = st.session_state.fit_results['params'][param_name]
+                                    st.session_state.model_params[param_name]['value'] = fitted_value
+                            
                             st.success(f"Fitting completed in {end_time - start_time:.2f} seconds")
+                            st.rerun()  # Добавляем rerun для обновления отображаемых значений в форме
                         else:
                             st.error("Fitting failed. Please check your parameters.")
         
