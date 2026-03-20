@@ -776,7 +776,11 @@ class InverseProblemSolver:
             'delta_CN_M': delta_CN_M,
             'r_A_base': r_A_base,
             'r_B_base': r_B_base,
-            'r_M_base': r_M_base
+            'r_M_base': r_M_base,
+            # Add element symbols
+            'A_element': self.A,
+            'B_element': self.B,
+            'M_element': self.M
         }
         self.results['cn_coefficients'] = result
         return result
