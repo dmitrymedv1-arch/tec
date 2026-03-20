@@ -1005,7 +1005,8 @@ def create_inverse_plot1_cached(inverse_results: Dict[str, Any],
 @st.cache_data(ttl=3600, show_spinner=False)
 def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
                                 composition: str,
-                                style: Dict[str, Any]) -> plt.Figure:
+                                style: Dict[str, Any],
+                                A: str, B: str, M: str) -> plt.Figure:  # Добавлены параметры A, B, M
     """
     Create plot 14: Defect parameters comparison
     """
@@ -1026,13 +1027,11 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
         ax1.set_ylabel('β × 10³', fontweight='bold')
         ax1.set_title('Chemical Expansion Coefficient: Experiment vs Theory', fontweight='bold')
         
-        # Add value labels
         for bar, val in zip(bars, values):
             height = bar.get_height()
             ax1.text(bar.get_x() + bar.get_width()/2., height + 0.1,
                     f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
         
-        # Add deviation
         dev = theo_res.get('deviation_pct', 0)
         ax1.text(0.5, 0.95, f'Deviation: {dev:+.1f}%',
                 transform=ax1.transAxes, ha='center', va='top',
@@ -1053,7 +1052,6 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
         ax2.set_ylabel('Lattice Contribution (Å)', fontweight='bold')
         ax2.set_title('Lattice Sum (Σ r_i)', fontweight='bold')
         
-        # Add value labels
         for bar, val in zip(bars, values):
             height = bar.get_height()
             ax2.text(bar.get_x() + bar.get_width()/2., height + 0.01,
@@ -1066,14 +1064,13 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
         r_B = tol_res.get('r_B_6', 0)
         r_O = tol_res.get('r_O_6', 0)
         
-        # Create a simple perovskite structure visualization
-        from matplotlib.patches import Circle, FancyBboxPatch
+        from matplotlib.patches import Circle
         
         # Draw circles representing ions
         ax3.add_patch(Circle((0.2, 0.6), r_A/5, color=style.get('thermal_line_color', '#1f77b4'),
-                             alpha=0.8, label=f'A ({self.A})'))
+                             alpha=0.8, label=f'A ({A})'))  # Исправлено: self.A -> A
         ax3.add_patch(Circle((0.5, 0.3), r_B/5, color=style.get('chemical_line_color', '#d62728'),
-                             alpha=0.8, label=f'B ({self.B}/{self.M})'))
+                             alpha=0.8, label=f'B ({B}/{M})'))  # Исправлено: self.B, self.M -> B, M
         ax3.add_patch(Circle((0.8, 0.6), r_O/5, color='red', alpha=0.8, label='O'))
         
         ax3.set_xlim(0, 1)
@@ -1083,7 +1080,6 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
         ax3.set_title(f'Tolerance Factor t = {t:.3f}', fontweight='bold')
         ax3.legend(loc='upper right', fontsize=8)
         
-        # Add stability text
         stability = tol_res.get('stability', 'Unknown')
         ax3.text(0.5, 0.05, stability, ha='center', va='center',
                 transform=ax3.transAxes, fontsize=9,
@@ -1103,7 +1099,6 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
         ax4.set_ylabel('r_V_O (Å)', fontweight='bold')
         ax4.set_title('Vacancy Radius: Comparison with Literature', fontweight='bold')
         
-        # Add value labels
         for bar, val in zip(bars, values):
             height = bar.get_height()
             ax4.text(bar.get_x() + bar.get_width()/2., height + 0.01,
@@ -2800,7 +2795,10 @@ Fixed parameters: {', '.join([k for k, v in st.session_state.fit_results['fixed_
         plot14 = create_inverse_plot2_cached(
             st.session_state.inverse_results,
             composition,
-            st.session_state.plot_style
+            st.session_state.plot_style,
+            st.session_state.composition['A'],
+            st.session_state.composition['B'],
+            st.session_state.composition['M']
         )
         
         plot15 = create_inverse_plot3_cached(
