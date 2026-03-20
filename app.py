@@ -759,7 +759,7 @@ class IonicRadiusModel:
         """Calculate the effective radius of OH- group in the lattice."""
         # Correct formula: r_OH = 2*β*S₀(x) - [2k_A + (1-x)k_B + x*k_M - r_O/2]
         S0 = self.S0
-        cation_term = 2 * self.radius_model.k_A + (1 - self.x) * self.radius_model.k_B + self.x * self.radius_model.k_M
+        cation_term = 2 * self.k_A + (1 - self.x) * self.k_B + self.x * self.k_M
         
         self.r_OH_eff = 2 * self.beta_chem_exp * S0 - (cation_term - self.r_O / 2)
         
