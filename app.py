@@ -908,9 +908,9 @@ class InverseProblemSolver:
         # Fully hydrated state (y = x)
         hydrated_full = self.radius_model.calculate_hydrated_state(self.x)
         
-        delta_r_A = hydrated_full['r_A_wet'] - self.r_A_dry
-        delta_r_B = hydrated_full['r_B_wet'] - self.r_B_dry
-        delta_r_M = hydrated_full['r_M_wet'] - self.r_M_dry
+        delta_r_A = hydrated_full['r_A'] - self.r_A_dry
+        delta_r_B = hydrated_full['r_B'] - self.r_B_dry
+        delta_r_M = hydrated_full['r_M'] - self.r_M_dry
         
         rel_delta_r_A = delta_r_A / self.r_A_dry * 100
         rel_delta_r_B = delta_r_B / self.r_B_dry * 100
@@ -926,9 +926,9 @@ class InverseProblemSolver:
             'r_A_dry': self.r_A_dry,
             'r_B_dry': self.r_B_dry,
             'r_M_dry': self.r_M_dry,
-            'r_A_wet': hydrated_full['r_A_wet'],
-            'r_B_wet': hydrated_full['r_B_wet'],
-            'r_M_wet': hydrated_full['r_M_wet']
+            'r_A_wet': hydrated_full['r_A'],
+            'r_B_wet': hydrated_full['r_B'],
+            'r_M_wet': hydrated_full['r_M']
         }
         self.results['cation_changes'] = result
         return result
