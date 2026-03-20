@@ -1068,9 +1068,9 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
         
         # Draw circles representing ions
         ax3.add_patch(Circle((0.2, 0.6), r_A/5, color=style.get('thermal_line_color', '#1f77b4'),
-                             alpha=0.8, label=f'A ({A})'))  # Fixed: self.A -> A
+                             alpha=0.8, label=f'A ({A})'))
         ax3.add_patch(Circle((0.5, 0.3), r_B/5, color=style.get('chemical_line_color', '#d62728'),
-                             alpha=0.8, label=f'B ({B}/{M})'))  # Fixed: self.B, self.M -> B, M
+                              alpha=0.8, label=f'B ({B}/{M})'))
         ax3.add_patch(Circle((0.8, 0.6), r_O/5, color='red', alpha=0.8, label='O'))
         
         ax3.set_xlim(0, 1)
