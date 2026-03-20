@@ -755,25 +755,31 @@ class IonicRadiusModel:
             'S_wet': S_wet
         }
     
-    def calculate_effective_oh_radius(self, beta_exp: float) -> float:
-        """
-        Calculate effective OH- radius from experimental β.
+    def calculate_effective_oh_radius(self) -> Dict[str, Any]:
+        """Calculate the effective radius of OH- group in the lattice."""
+        # Correct formula: r_OH = 2*β*S₀(x) - [2k_A + (1-x)k_B + x*k_M - r_O/2]
+        S0 = self.S0
+        cation_term = 2 * self.radius_model.k_A + (1 - self.x) * self.radius_model.k_B + self.x * self.radius_model.k_M
         
-        For fully hydrated state (y = x):
-        S0 * (1 + β_exp * x) = r_A_wet + (1-x)*r_B_wet + x*r_M_wet + (3 - x/2)*r_O + x * r_OH_eff
+        self.r_OH_eff = 2 * self.beta_chem_exp * S0 - (cation_term - self.r_O / 2)
         
-        Therefore:
-        r_OH_eff = [S0*(1 + β_exp*x) - (r_A_base + (1-x)*r_B_base + x*r_M_base + (3 - x/2)*r_O)] / x
-        """
-        # Fully hydrated state has maximum coordination
-        cation_sum = self.r_A_base + (1 - self.x) * self.r_B_base + self.x * self.r_M_base
-        oxygen_contrib = (3 - self.x/2) * self.r_O
+        # Compare with tabulated value
+        deviation_pct = (self.r_OH_eff - self.r_OH_table) / self.r_OH_table * 100
         
-        target_sum = self.S0 * (1 + beta_exp * self.x)
+        # Add warning if deviation is too large
+        warning = None
+        if abs(deviation_pct) > 50:
+            warning = f"Large deviation ({deviation_pct:.1f}%) suggests model limitations or experimental issues"
         
-        r_OH_eff = (target_sum - cation_sum - oxygen_contrib) / self.x
-        return r_OH_eff
-    
+        result = {
+            'r_OH_table': self.r_OH_table,
+            'r_OH_eff': self.r_OH_eff,
+            'deviation_pct': deviation_pct,
+            'warning': warning
+        }
+        self.results['oh_radius'] = result
+        return result
+        
     def calculate_effective_vacancy_radius(self, beta_exp: float) -> float:
         """
         Calculate effective oxygen vacancy radius from experimental β.
@@ -977,8 +983,13 @@ class InverseProblemSolver:
         """
         Calculate theoretical beta_chem based on ionic radii model.
         """
-        beta_chem_theory = (self.radius_model.r_M_base - self.radius_model.r_B_base) / (self.radius_model.r_B_base + self.radius_model.r_O) + \
-                           (self.r_V_eff - self.radius_model.r_O) / (4 * (self.radius_model.r_B_base + self.radius_model.r_O))
+        # Calculate using the corrected formula
+        S0 = self.S0
+        cation_term = 2 * self.radius_model.k_A + (1 - self.x) * self.radius_model.k_B + self.x * self.radius_model.k_M
+        anion_term = self.r_OH_table - self.r_O / 2
+        
+        numerator = cation_term + anion_term
+        beta_chem_theory = numerator / (2 * S0)
         
         # Compare with experimental
         deviation_pct = (beta_chem_theory - self.beta_chem_exp) / self.beta_chem_exp * 100
