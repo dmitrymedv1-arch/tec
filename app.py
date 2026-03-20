@@ -2329,7 +2329,7 @@ def main():
                 st.markdown("Check 'Fix' to keep parameter constant during fitting")
                 
                 # Use a unique form key based on session state to prevent duplicates
-                form_key = f"model_params_form_{hash(str(st.session_state.model_params))}"
+                form_key = f"model_params_form_{hash(str(st.session_state.model_params))}_{st.session_state.get('fit_timestamp', 0)}"
                 
                 with st.form(form_key):
                     col1, col2 = st.columns(2)
@@ -2487,10 +2487,15 @@ def main():
                                     st.session_state.current_stage = 1
                                     st.session_state.inverse_complete = False
                                     
+                                    if 'fit_timestamp' not in st.session_state:
+                                        st.session_state.fit_timestamp = 0
+                                    st.session_state.fit_timestamp += 1
+                                    
                                     for param_name in ['Acc', 'alpha_1e6', 'beta', 'dH', 'dS', 'pH2O', 'residue']:
                                         if not st.session_state.model_params[param_name]['fixed']:
                                             fitted_value = st.session_state.fit_results['params'][param_name]
                                             st.session_state.model_params[param_name]['value'] = fitted_value
+                                            print(f"Updated {param_name} from {st.session_state.model_params[param_name]['value']} to {fitted_value}")
                                         else:
                                             current_value = st.session_state.model_params[param_name]['value']
                                             st.session_state.model_params[param_name]['value'] = current_value
