@@ -1229,6 +1229,12 @@ def create_inverse_report_cached(inverse_results: Dict[str, Any],
     """
     Generate a text report of inverse problem results.
     """
+    # Get element symbols from inverse_results
+    A_element = inverse_results.get('A_element', 'A')
+    B_element = inverse_results.get('B_element', 'B')
+    M_element = inverse_results.get('M_element', 'M')
+    x_value = inverse_results.get('x', 0.1)
+    
     report = []
     report.append("=" * 80)
     report.append("INVERSE PROBLEM ANALYSIS REPORT")
@@ -1281,9 +1287,9 @@ def create_inverse_report_cached(inverse_results: Dict[str, Any],
         report.append("-" * 40)
         report.append("CATION RADIUS CHANGES UPON HYDRATION")
         report.append("-" * 40)
-        report.append(f"A-site ({self.A}) change: {cat_res.get('delta_r_A', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_A', 0):+.2f}%)")
-        report.append(f"B-site ({self.B}) change: {cat_res.get('delta_r_B', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_B', 0):+.2f}%)")
-        report.append(f"M-site ({self.M}) change: {cat_res.get('delta_r_M', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_M', 0):+.2f}%)")
+        report.append(f"A-site ({A_element}) change: {cat_res.get('delta_r_A', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_A', 0):+.2f}%)")
+        report.append(f"B-site ({B_element}) change: {cat_res.get('delta_r_B', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_B', 0):+.2f}%)")
+        report.append(f"M-site ({M_element}) change: {cat_res.get('delta_r_M', 0)*1000:.3f} ×10⁻³ Å ({cat_res.get('rel_delta_r_M', 0):+.2f}%)")
         report.append(f"Total cation contribution: {cat_res.get('delta_L_cation', 0)*1000:.3f} ×10⁻³ Å")
         report.append(f"Total anion contribution: {cat_res.get('delta_L_anion', 0)*1000:.3f} ×10⁻³ Å")
         report.append(f"Consistency check: {cat_res.get('consistency_check', False)}")
