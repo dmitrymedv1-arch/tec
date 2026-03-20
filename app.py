@@ -872,6 +872,12 @@ class InverseProblemSolver:
         self.calculate_tolerance_factor()
         self.calculate_theoretical_beta_chem()
         
+        # Add composition information to results
+        self.results['A_element'] = self.A
+        self.results['B_element'] = self.B
+        self.results['M_element'] = self.M
+        self.results['x'] = self.x
+        
         return self.results
 
 # ============================================
@@ -1129,6 +1135,13 @@ def create_inverse_plot3_cached(inverse_results: Dict[str, Any],
     """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
     
+    # Get the actual element symbols from the results
+    # They should be stored in the results dictionary
+    A_element = inverse_results.get('A_element', 'Ba')
+    B_element = inverse_results.get('B_element', 'Zr')
+    M_element = inverse_results.get('M_element', 'Y')
+    x_value = inverse_results.get('x', 0.1)
+    
     cn_res = inverse_results.get('cn_coefficients', {})
     cation_res = inverse_results.get('cation_changes', {})
     
@@ -1136,31 +1149,33 @@ def create_inverse_plot3_cached(inverse_results: Dict[str, Any],
     if cn_res:
         # A-site
         cn_range = np.linspace(6, 12, 50)
-        r_A = [get_radius_interp('A', 2, cn, False, coord_points=(8, 12)) 
+        r_A = [get_radius_interp(A_element, 2, cn, False, coord_points=(8, 12)) 
                for cn in cn_range]
         ax1.plot(cn_range, r_A, '-', color=style.get('thermal_line_color', '#1f77b4'),
-                linewidth=2, label=f'A-site ({self.A})')
+                linewidth=2, label=f'A-site ({A_element})')
         
         # B-site
         cn_range_b = np.linspace(4, 8, 50)
-        r_B = [get_radius_interp('B', 4, cn, False, coord_points=(6, 8)) 
+        r_B = [get_radius_interp(B_element, 4, cn, False, coord_points=(6, 8)) 
                for cn in cn_range_b]
         ax1.plot(cn_range_b, r_B, '-', color=style.get('chemical_line_color', '#d62728'),
-                linewidth=2, label=f'B-site ({self.B})')
+                linewidth=2, label=f'B-site ({B_element})')
         
         # M-site
-        r_M = [get_radius_interp('M', 3, cn, False, coord_points=(6, 8)) 
+        r_M = [get_radius_interp(M_element, 3, cn, False, coord_points=(6, 8)) 
                for cn in cn_range_b]
         ax1.plot(cn_range_b, r_M, '--', color=style.get('model_line_color', '#000000'),
-                linewidth=2, label=f'M-site ({self.M})')
+                linewidth=2, label=f'M-site ({M_element})')
         
-        # Mark experimental points
-        ax1.plot(cn_res.get('CN_A_dry', 0), cn_res.get('r_A_dry', 0), 'o',
-                color=style.get('point_color', '#1f77b4'), markersize=8,
-                markeredgecolor='black', label='Dry state')
-        ax1.plot(cn_res.get('CN_A_wet', 0), cn_res.get('r_A_wet', 0), 's',
-                color=style.get('point_color', '#1f77b4'), markersize=8,
-                markeredgecolor='black', label='Hydrated state')
+        # Mark experimental points if available
+        if 'CN_A_dry' in cn_res and 'r_A_dry' in cn_res:
+            ax1.plot(cn_res.get('CN_A_dry', 0), cn_res.get('r_A_dry', 0), 'o',
+                    color=style.get('point_color', '#1f77b4'), markersize=8,
+                    markeredgecolor='black', label='Dry state')
+        if 'CN_A_wet' in cn_res and 'r_A_wet' in cn_res:
+            ax1.plot(cn_res.get('CN_A_wet', 0), cn_res.get('r_A_wet', 0), 's',
+                    color=style.get('point_color', '#1f77b4'), markersize=8,
+                    markeredgecolor='black', label='Hydrated state')
         
         ax1.set_xlabel('Coordination Number', fontweight='bold')
         ax1.set_ylabel('Ionic Radius (Å)', fontweight='bold')
@@ -1171,23 +1186,34 @@ def create_inverse_plot3_cached(inverse_results: Dict[str, Any],
     # Plot 2: Radial distribution
     if cation_res:
         # Create a pie chart of contributions
-        labels = [f'A-site ({self.A})', f'B-site ({self.B})', f'M-site ({self.M})', 'Oxygen']
+        labels = [f'A-site ({A_element})', f'B-site ({B_element})', 
+                  f'M-site ({M_element})', 'Oxygen/Anions']
         sizes = [abs(cation_res.get('delta_r_A', 0)),
-                 abs((1 - self.x) * cation_res.get('delta_r_B', 0)),
-                 abs(self.x * cation_res.get('delta_r_M', 0)),
+                 abs((1 - x_value) * cation_res.get('delta_r_B', 0)),
+                 abs(x_value * cation_res.get('delta_r_M', 0)),
                  abs(cation_res.get('delta_L_anion', 0))]
         
-        colors = [style.get('thermal_line_color', '#1f77b4'),
-                  style.get('chemical_line_color', '#d62728'),
-                  style.get('model_line_color', '#000000'),
-                  'gray']
-        
-        wedges, texts, autotexts = ax2.pie(sizes, labels=labels, colors=colors,
-                                           autopct='%1.1f%%', startangle=90,
-                                           wedgeprops={'edgecolor': 'black', 'linewidth': 1})
-        for autotext in autotexts:
-            autotext.set_color('white')
-            autotext.set_fontweight('bold')
+        # Filter out zero values
+        non_zero = [(l, s) for l, s in zip(labels, sizes) if s > 1e-10]
+        if non_zero:
+            labels, sizes = zip(*non_zero)
+            
+            colors = [style.get('thermal_line_color', '#1f77b4'),
+                      style.get('chemical_line_color', '#d62728'),
+                      style.get('model_line_color', '#000000'),
+                      'gray']
+            # Use only as many colors as we have non-zero sizes
+            colors = colors[:len(labels)]
+            
+            wedges, texts, autotexts = ax2.pie(sizes, labels=labels, colors=colors,
+                                               autopct='%1.1f%%', startangle=90,
+                                               wedgeprops={'edgecolor': 'black', 'linewidth': 1})
+            for autotext in autotexts:
+                autotext.set_color('white')
+                autotext.set_fontweight('bold')
+        else:
+            ax2.text(0.5, 0.5, 'No significant\ncontributions', 
+                    ha='center', va='center', transform=ax2.transAxes)
         
         ax2.set_title('Contribution to Chemical Expansion', fontweight='bold')
     
