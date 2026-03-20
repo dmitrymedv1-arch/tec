@@ -584,7 +584,16 @@ class IonicRadiusModel:
     Based on equations from Zuev et al. (2022) and Løken et al. (2018).
     """
     
-    def __init__(self, A: str, B: str, M: str, x: float, use_shannon: bool = False):
+    # Known radius values for interpolation (Shannon radii)
+    KNOWN_RADII = {
+        'Ba': {2: {8: 1.42, 12: 1.61}},  # Ba²⁺ at CN=8 and CN=12
+        'Sn': {4: {4: 0.55, 6: 0.69}},    # Sn⁴⁺ at CN=4 and CN=6
+        'In': {3: {4: 0.62, 6: 0.80}},    # In³⁺ at CN=4 and CN=6
+        'O2-': {-2: {4: 1.38}},            # O²⁻ at CN=4
+        'OH-': {-1: {4: 1.35}}             # OH⁻ at CN=4
+    }
+    
+    def __init__(self, A: str, B: str, M: str, x: float, use_shannon: bool = True):
         """
         Initialize the ionic radius model.
         
@@ -604,64 +613,104 @@ class IonicRadiusModel:
         self.use_shannon = use_shannon
         
         # Constants
-        self.r_O = get_radius('O2-', -2, 4, use_shannon)
-        self.r_OH_table = get_radius('OH-', -1, 4, use_shannon)
+        self.r_O = self._get_radius('O2-', -2, 4)
+        self.r_OH_table = self._get_radius('OH-', -1, 4)
         
-        # Calculate sensitivity coefficients k = dr/dCN
-        self._calculate_sensitivity_coefficients()
-        
-        # Calculate reference state (dry, maximum vacancies)
-        self._calculate_reference_state()
-    
-    def _calculate_sensitivity_coefficients(self):
-        """
-        Calculate sensitivity coefficients k = dr/dCN for each cation.
-        
-        For A-site: interpolate between CN=8 and CN=12
-        For B-site and M-site: interpolate between CN=6 and CN=8
-        """
-        # A-site (2+)
-        r_A_8 = get_radius_interp(self.A, 2, 8, self.use_shannon, coord_points=(8, 12))
-        r_A_12 = get_radius_interp(self.A, 2, 12, self.use_shannon, coord_points=(8, 12))
-        self.k_A = (r_A_12 - r_A_8) / 4  # Δr per CN unit
-        self.r_A_base = r_A_12  # Reference radius at CN=12
-        
-        # B-site (4+)
-        r_B_6 = get_radius_interp(self.B, 4, 6, self.use_shannon, coord_points=(6, 8))
-        r_B_8 = get_radius_interp(self.B, 4, 8, self.use_shannon, coord_points=(6, 8))
-        self.k_B = (r_B_8 - r_B_6) / 2  # Δr per CN unit
-        self.r_B_base = r_B_6  # Reference radius at CN=6
-        
-        # M-site (3+, acceptor)
-        r_M_6 = get_radius_interp(self.M, 3, 6, self.use_shannon, coord_points=(6, 8))
-        r_M_8 = get_radius_interp(self.M, 3, 8, self.use_shannon, coord_points=(6, 8))
-        self.k_M = (r_M_8 - r_M_6) / 2  # Δr per CN unit
-        self.r_M_base = r_M_6  # Reference radius at CN=6
-    
-    def _calculate_reference_state(self):
-        """
-        Calculate reference state parameters (dry, maximum vacancies).
-        
-        In dry state: delta_dry = x/2
-        """
+        # Calculate dry state (maximum vacancies)
         self.delta_dry = self.x / 2.0
-        
-        # Coordination numbers in dry state (Equation 35 from Zuev et al.)
-        self.CN_A_dry = max(12 - 4 * self.delta_dry, 8)
-        self.CN_B_dry = max(6 - 2 * self.delta_dry, 4)
+        self.CN_A_dry = 12 - 4 * self.delta_dry
+        self.CN_B_dry = 6 - 2 * self.delta_dry
         self.CN_M_dry = self.CN_B_dry
         
-        # Ionic radii in dry state (using linear interpolation)
-        self.r_A_dry = self.r_A_base - self.k_A * (12 - self.CN_A_dry)
-        self.r_B_dry = self.r_B_base - self.k_B * (6 - self.CN_B_dry)
-        self.r_M_dry = self.r_M_base - self.k_M * (6 - self.CN_M_dry)
+        # Get radii in dry state using linear interpolation
+        self.r_A_dry = self._get_radius_interp(self.A, 2, self.CN_A_dry)
+        self.r_B_dry = self._get_radius_interp(self.B, 4, self.CN_B_dry)
+        self.r_M_dry = self._get_radius_interp(self.M, 3, self.CN_M_dry)
         
-        # Lattice sum in dry state (proportional to unit cell size)
-        # S0 = r_A + (1-x)*r_B + x*r_M + (3 - delta)*r_O
+        # Reference radii at maximum coordination (for fully hydrated state)
+        self.r_A_base = self._get_radius_interp(self.A, 2, 12)
+        self.r_B_base = self._get_radius_interp(self.B, 4, 6)
+        self.r_M_base = self._get_radius_interp(self.M, 3, 6)
+        
+        # Calculate sensitivity coefficients k = dr/dCN
+        self.k_A = (self.r_A_base - self._get_radius_interp(self.A, 2, 8)) / 4  # Δr per CN unit
+        self.k_B = (self.r_B_base - self._get_radius_interp(self.B, 4, 4)) / 2
+        self.k_M = (self.r_M_base - self._get_radius_interp(self.M, 3, 4)) / 2
+        
+        # Lattice sum in dry state
         self.S0 = (self.r_A_dry + 
                    (1 - self.x) * self.r_B_dry + 
                    self.x * self.r_M_dry + 
                    (3 - self.delta_dry) * self.r_O)
+    
+    def _get_radius(self, element: str, charge: int, cn: int) -> float:
+        """Get radius from database"""
+        if element in self.KNOWN_RADII and charge in self.KNOWN_RADII[element]:
+            if cn in self.KNOWN_RADII[element][charge]:
+                return self.KNOWN_RADII[element][charge][cn]
+        raise ValueError(f"No radius data for {element}^{charge} at CN={cn}")
+    
+    def _get_radius_interp(self, element: str, charge: int, cn: float) -> float:
+        """
+        Get radius by linear interpolation between known CN values.
+        
+        For A-site: interpolate between CN=8 and CN=12
+        For B-site: interpolate between CN=4 and CN=6
+        For M-site: interpolate between CN=4 and CN=6
+        """
+        if element not in self.KNOWN_RADII or charge not in self.KNOWN_RADII[element]:
+            raise ValueError(f"No radius data for {element}^{charge}")
+        
+        radii_dict = self.KNOWN_RADII[element][charge]
+        cn_values = sorted(radii_dict.keys())
+        
+        # If exact match, return directly
+        if cn in radii_dict:
+            return radii_dict[cn]
+        
+        # If below minimum, use minimum
+        if cn <= min(cn_values):
+            return radii_dict[min(cn_values)]
+        
+        # If above maximum, use maximum
+        if cn >= max(cn_values):
+            return radii_dict[max(cn_values)]
+        
+        # Interpolate between surrounding points
+        for i in range(len(cn_values)-1):
+            if cn_values[i] <= cn <= cn_values[i+1]:
+                cn1, cn2 = cn_values[i], cn_values[i+1]
+                r1, r2 = radii_dict[cn1], radii_dict[cn2]
+                return r1 + (r2 - r1) * (cn - cn1) / (cn2 - cn1)
+        
+        return radii_dict[cn_values[0]]
+    
+    def get_coordination_at_hydration(self, y: float) -> Dict[str, float]:
+        """
+        Get coordination numbers at given hydration level y.
+        
+        Parameters:
+        -----------
+        y : float
+            Degree of hydration (0 ≤ y ≤ x)
+        
+        Returns:
+        --------
+        Dict with CN_A, CN_B, CN_M
+        """
+        # Remaining vacancies after hydration
+        delta = self.delta_dry - y/2
+        
+        # Coordination numbers increase as vacancies are filled
+        CN_A = 12 - 4 * delta
+        CN_B = 6 - 2 * delta
+        CN_M = CN_B
+        
+        return {
+            'CN_A': CN_A,
+            'CN_B': CN_B,
+            'CN_M': CN_M
+        }
     
     def calculate_hydrated_state(self, y: float) -> Dict[str, float]:
         """
@@ -674,180 +723,77 @@ class IonicRadiusModel:
         
         Returns:
         --------
-        Dict[str, float]
-            Dictionary with hydrated state parameters
+        Dict with hydrated state parameters
         """
-        # Remaining vacancies after hydration
-        delta_wet = self.delta_dry - y/2
+        cn = self.get_coordination_at_hydration(y)
         
-        # Coordination numbers in hydrated state
-        CN_A_wet = max(12 - 4 * delta_wet, 8)
-        CN_B_wet = max(6 - 2 * delta_wet, 4)
-        CN_M_wet = CN_B_wet
-        
-        # Ionic radii in hydrated state
-        r_A_wet = self.r_A_base - self.k_A * (12 - CN_A_wet)
-        r_B_wet = self.r_B_base - self.k_B * (6 - CN_B_wet)
-        r_M_wet = self.r_M_base - self.k_M * (6 - CN_M_wet)
+        # Radii at current coordination
+        r_A = self._get_radius_interp(self.A, 2, cn['CN_A'])
+        r_B = self._get_radius_interp(self.B, 4, cn['CN_B'])
+        r_M = self._get_radius_interp(self.M, 3, cn['CN_M'])
         
         # Lattice sum in hydrated state
-        # S = r_A + (1-x)*r_B + x*r_M + (3 - delta_wet - y/2)*r_O + y*r_OH
-        # Note: (3 - delta_wet - y/2) = (3 - delta_dry) because delta_wet = delta_dry - y/2
-        S_wet = (r_A_wet + 
-                 (1 - self.x) * r_B_wet + 
-                 self.x * r_M_wet + 
+        # In hydrated state, we have:
+        # - (3 - delta_dry) oxygen atoms (because total oxygen sites = 3)
+        # - y OH groups
+        # The oxygen contribution is (3 - delta_dry) * r_O, NOT (3 - delta) * r_O
+        # because oxygen sites are fixed, just some are replaced by OH
+        S_wet = (r_A + 
+                 (1 - self.x) * r_B + 
+                 self.x * r_M + 
                  (3 - self.delta_dry) * self.r_O + 
                  y * self.r_OH_table)
         
         return {
-            'delta_wet': delta_wet,
-            'CN_A_wet': CN_A_wet,
-            'CN_B_wet': CN_B_wet,
-            'CN_M_wet': CN_M_wet,
-            'r_A_wet': r_A_wet,
-            'r_B_wet': r_B_wet,
-            'r_M_wet': r_M_wet,
+            'delta': self.delta_dry - y/2,
+            'CN_A': cn['CN_A'],
+            'CN_B': cn['CN_B'],
+            'CN_M': cn['CN_M'],
+            'r_A': r_A,
+            'r_B': r_B,
+            'r_M': r_M,
             'S_wet': S_wet
         }
-    
-    def calculate_beta_chem_theoretical(self) -> float:
-        """
-        Calculate theoretical chemical expansion coefficient β.
-        
-        β_theory = (S_wet_full - S0) / (S0 * x)
-        where S_wet_full is the lattice sum for fully hydrated state (y = x)
-        """
-        hydrated_full = self.calculate_hydrated_state(self.x)
-        beta_theory = (hydrated_full['S_wet'] - self.S0) / (self.S0 * self.x)
-        return beta_theory
     
     def calculate_effective_oh_radius(self, beta_exp: float) -> float:
         """
         Calculate effective OH- radius from experimental β.
         
-        From: β_exp = (S_wet - S0) / (S0 * x)
-        and S_wet = r_A_wet + (1-x)*r_B_wet + x*r_M_wet + (3 - delta_dry)*r_O + x*r_OH_eff
+        For fully hydrated state (y = x):
+        S0 * (1 + β_exp * x) = r_A_wet + (1-x)*r_B_wet + x*r_M_wet + (3 - x/2)*r_O + x * r_OH_eff
         
         Therefore:
-        r_OH_eff = [S0*(1 + β_exp*x) - (r_A_wet + (1-x)*r_B_wet + x*r_M_wet + (3 - delta_dry)*r_O)] / x
+        r_OH_eff = [S0*(1 + β_exp*x) - (r_A_base + (1-x)*r_B_base + x*r_M_base + (3 - x/2)*r_O)] / x
         """
-        # For fully hydrated state (y = x), CNs are at maximum
-        r_A_wet = self.r_A_base  # CN=12
-        r_B_wet = self.r_B_base  # CN=6
-        r_M_wet = self.r_M_base  # CN=6
+        # Fully hydrated state has maximum coordination
+        cation_sum = self.r_A_base + (1 - self.x) * self.r_B_base + self.x * self.r_M_base
+        oxygen_contrib = (3 - self.x/2) * self.r_O
         
-        cation_sum = r_A_wet + (1 - self.x) * r_B_wet + self.x * r_M_wet
-        anion_base = (3 - self.delta_dry) * self.r_O
+        target_sum = self.S0 * (1 + beta_exp * self.x)
         
-        r_OH_eff = (self.S0 * (1 + beta_exp * self.x) - cation_sum - anion_base) / self.x
+        r_OH_eff = (target_sum - cation_sum - oxygen_contrib) / self.x
         return r_OH_eff
     
     def calculate_effective_vacancy_radius(self, beta_exp: float) -> float:
         """
         Calculate effective oxygen vacancy radius from experimental β.
         
-        Using the Hong-Virkar type model:
-        r_V_eff = 4*(r_B_base + r_O)*(β_exp - (r_M_base - r_B_base)/(r_B_base + r_O)) + r_O
+        Using the Hong-Virkar model:
+        β = (r_M_base - r_B_base)/(r_B_base + r_O) + (r_V_eff - r_O)/(4*(r_B_base + r_O))
+        
+        Therefore:
+        r_V_eff = 4*(r_B_base + r_O)*(β - (r_M_base - r_B_base)/(r_B_base + r_O)) + r_O
         """
-        # Calculate the cation contribution to expansion
+        # Cation contribution to expansion
         cation_contrib = (self.r_M_base - self.r_B_base) / (self.r_B_base + self.r_O)
         
-        # Total expansion β_exp = cation_contrib + (r_V_eff - r_O)/(4*(r_B_base + r_O))
-        r_V_eff = 4 * (self.r_B_base + self.r_O) * (beta_exp - cation_contrib) + self.r_O
+        # Total expansion from experiment
+        # β_exp is already per mole of acceptor, so we need to convert to per mole of vacancies
+        # One mole of acceptor creates 0.5 moles of vacancies
+        beta_per_vacancy = beta_exp / 0.5  # because δ = x/2
         
+        r_V_eff = 4 * (self.r_B_base + self.r_O) * (beta_per_vacancy - cation_contrib) + self.r_O
         return r_V_eff
-    
-    def get_coordination_numbers_temperature(self, T: np.ndarray, oh: np.ndarray) -> Dict[str, np.ndarray]:
-        """
-        Calculate coordination numbers as a function of temperature.
-        
-        Parameters:
-        -----------
-        T : np.ndarray
-            Temperature in Celsius
-        oh : np.ndarray
-            Proton concentration at each temperature
-        
-        Returns:
-        --------
-        Dict[str, np.ndarray]
-            Dictionary with CN_A, CN_B, CN_M for each temperature
-        """
-        # y is the degree of hydration (0 to x)
-        y = oh  # [OH] concentration directly gives y
-        
-        # Remaining vacancies
-        delta = self.delta_dry - y/2
-        
-        # Coordination numbers
-        CN_A = 12 - 4 * delta
-        CN_B = 6 - 2 * delta
-        CN_M = CN_B
-        
-        # Ensure CNs are within reasonable limits
-        CN_A = np.maximum(CN_A, 8)
-        CN_B = np.maximum(CN_B, 4)
-        CN_M = CN_B
-        
-        return {
-            'CN_A': CN_A,
-            'CN_B': CN_B,
-            'CN_M': CN_M
-        }
-    
-    def calculate_radius_contributions(self, T: np.ndarray, oh: np.ndarray) -> Dict[str, np.ndarray]:
-        """
-        Calculate individual contributions to chemical expansion.
-        
-        Returns:
-        --------
-        Dict with contributions from each site and total chemical expansion
-        """
-        y = oh
-        delta = self.delta_dry - y/2
-        
-        # Coordination numbers
-        CN_A = 12 - 4 * delta
-        CN_B = 6 - 2 * delta
-        CN_M = CN_B
-        
-        CN_A = np.maximum(CN_A, 8)
-        CN_B = np.maximum(CN_B, 4)
-        CN_M = CN_B
-        
-        # Current radii
-        r_A_curr = self.r_A_base - self.k_A * (12 - CN_A)
-        r_B_curr = self.r_B_base - self.k_B * (6 - CN_B)
-        r_M_curr = self.r_M_base - self.k_M * (6 - CN_M)
-        
-        # Cation contributions to expansion (relative to dry state)
-        delta_r_A = r_A_curr - self.r_A_dry
-        delta_r_B = r_B_curr - self.r_B_dry
-        delta_r_M = r_M_curr - self.r_M_dry
-        
-        # Anion contribution (OH replacing O and vacancies disappearing)
-        # At each point, the number of OH is y, and remaining O is (3 - delta_dry)
-        delta_anion = y * self.r_OH_table - (y/2) * self.r_O  # Net effect
-        
-        # Total chemical expansion relative to dry state
-        chem_expansion = (delta_r_A + 
-                          (1 - self.x) * delta_r_B + 
-                          self.x * delta_r_M + 
-                          delta_anion) / self.S0
-        
-        return {
-            'r_A_curr': r_A_curr,
-            'r_B_curr': r_B_curr,
-            'r_M_curr': r_M_curr,
-            'delta_r_A': delta_r_A,
-            'delta_r_B': delta_r_B,
-            'delta_r_M': delta_r_M,
-            'delta_anion': delta_anion,
-            'chem_expansion': chem_expansion,
-            'CN_A': CN_A,
-            'CN_B': CN_B,
-            'CN_M': CN_M
-        }
 
 # ============================================
 # INVERSE PROBLEM CALCULATIONS (UPDATED)
@@ -909,31 +855,39 @@ class InverseProblemSolver:
         self.results = {}
     
     def calculate_effective_oh_radius(self) -> Dict[str, Any]:
-        """
-        Calculate the effective radius of OH- group in the lattice.
-        """
+        """Calculate the effective radius of OH- group in the lattice."""
         self.r_OH_eff = self.radius_model.calculate_effective_oh_radius(self.beta_chem_exp)
         
         # Compare with tabulated value
         deviation_pct = (self.r_OH_eff - self.r_OH_table) / self.r_OH_table * 100
         
+        # Add warning if deviation is too large
+        warning = None
+        if abs(deviation_pct) > 50:
+            warning = f"Large deviation ({deviation_pct:.1f}%) suggests model limitations or experimental issues"
+        
         result = {
             'r_OH_table': self.r_OH_table,
             'r_OH_eff': self.r_OH_eff,
-            'deviation_pct': deviation_pct
+            'deviation_pct': deviation_pct,
+            'warning': warning
         }
         self.results['oh_radius'] = result
         return result
     
     def calculate_effective_vacancy_radius(self) -> Dict[str, Any]:
-        """
-        Calculate the effective radius of oxygen vacancy.
-        """
+        """Calculate the effective radius of oxygen vacancy."""
         self.r_V_eff = self.radius_model.calculate_effective_vacancy_radius(self.beta_chem_exp)
         
         # Literature range for perovskites (from Zuev et al.)
         lit_min, lit_max = 1.16, 1.24
         lit_ratio_min, lit_ratio_max = 0.92, 0.98
+        
+        # Add warning if outside literature range
+        within_literature = (lit_min <= self.r_V_eff <= lit_max)
+        warning = None
+        if not within_literature:
+            warning = f"r_V = {self.r_V_eff:.3f} Å outside literature range [{lit_min:.2f}, {lit_max:.2f}] Å"
         
         result = {
             'r_V_eff': self.r_V_eff,
@@ -941,7 +895,8 @@ class InverseProblemSolver:
             'ratio_rV_rO': self.r_V_eff / self.r_O,
             'literature_range': (lit_min, lit_max),
             'literature_ratio_range': (lit_ratio_min, lit_ratio_max),
-            'within_literature': (lit_min <= self.r_V_eff <= lit_max)
+            'within_literature': within_literature,
+            'warning': warning
         }
         self.results['vacancy_radius'] = result
         return result
