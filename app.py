@@ -2,6 +2,11 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit, fsolve
+from scipy.stats import norm, probplot
+try:
+    from scipy.misc import derivative  # for older scipy versions (<1.12)
+except ImportError:
+    from scipy.optimize import derivative  # for newer scipy versions (>=1.12)
 import pandas as pd
 import io
 import warnings
@@ -9,14 +14,14 @@ import matplotlib.cm as cm
 from matplotlib.colors import Normalize, LinearSegmentedColormap
 from typing import Dict, Any, Optional, Tuple, List
 import time
-from scipy.stats import norm, probplot
 from statsmodels.graphics.tsaplots import plot_acf
-from scipy.optimize import derivative
 from datetime import datetime
 import json
 import base64
 from pathlib import Path
 import re
+import zipfile
+from io import BytesIO
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
