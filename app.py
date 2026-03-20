@@ -884,7 +884,7 @@ class InverseProblemSolver:
     
     def calculate_effective_oh_radius(self) -> Dict[str, Any]:
         """Calculate the effective radius of OH- group in the lattice."""
-        self.r_OH_eff = self.radius_model.calculate_effective_oh_radius(self.beta_chem_exp)
+        self.r_OH_eff = self.radius_model.calculate_effective_oh_radius()
         
         # Compare with tabulated value
         deviation_pct = (self.r_OH_eff - self.r_OH_table) / self.r_OH_table * 100
