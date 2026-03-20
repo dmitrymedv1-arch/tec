@@ -1027,25 +1027,56 @@ class InverseProblemSolver:
         """
         Calculate temperature-dependent properties using the ionic radius model.
         """
-        # Get coordination numbers
-        cn_dict = self.radius_model.get_coordination_numbers_temperature(T, oh)
+        # Get coordination numbers for each temperature point
+        cn_dict = {
+            'CN_A': np.array([self.radius_model.get_coordination_at_hydration(y_i)['CN_A'] for y_i in oh]),
+            'CN_B': np.array([self.radius_model.get_coordination_at_hydration(y_i)['CN_B'] for y_i in oh]),
+            'CN_M': np.array([self.radius_model.get_coordination_at_hydration(y_i)['CN_M'] for y_i in oh])
+        }
         
-        # Get radius contributions
-        contrib_dict = self.radius_model.calculate_radius_contributions(T, oh)
+        # Calculate radius contributions for each temperature point
+        r_A_curr = np.zeros_like(T)
+        r_B_curr = np.zeros_like(T)
+        r_M_curr = np.zeros_like(T)
+        delta_r_A = np.zeros_like(T)
+        delta_r_B = np.zeros_like(T)
+        delta_r_M = np.zeros_like(T)
+        chem_expansion = np.zeros_like(T)
+        
+        for i, (T_i, y_i) in enumerate(zip(T, oh)):
+            # Get hydrated state at this y
+            hydrated = self.radius_model.calculate_hydrated_state(y_i)
+            r_A_curr[i] = hydrated['r_A']
+            r_B_curr[i] = hydrated['r_B']
+            r_M_curr[i] = hydrated['r_M']
+            
+            # Calculate changes from dry state
+            delta_r_A[i] = hydrated['r_A'] - self.r_A_dry
+            delta_r_B[i] = hydrated['r_B'] - self.r_B_dry
+            delta_r_M[i] = hydrated['r_M'] - self.r_M_dry
+        
+        # Calculate anion contribution (OH- replaces O2-)
+        delta_anion = oh * (self.r_OH_table - self.r_O)
+        
+        # Calculate total chemical expansion from model
+        # S = r_A + (1-x)*r_B + x*r_M + (3-x/2)*r_O + y*(r_OH - r_O)
+        S_dry = self.S0
+        S_wet = r_A_curr + (1 - self.x) * r_B_curr + self.x * r_M_curr + (3 - self.delta_dry) * self.r_O + oh * self.r_OH_table
+        chem_expansion_model = (S_wet - S_dry) / (3 * (self.r_B_base + self.r_O))
         
         # Combine results
         result = {
             'CN_A': cn_dict['CN_A'],
             'CN_B': cn_dict['CN_B'],
             'CN_M': cn_dict['CN_M'],
-            'r_A_curr': contrib_dict['r_A_curr'],
-            'r_B_curr': contrib_dict['r_B_curr'],
-            'r_M_curr': contrib_dict['r_M_curr'],
-            'delta_r_A': contrib_dict['delta_r_A'],
-            'delta_r_B': contrib_dict['delta_r_B'],
-            'delta_r_M': contrib_dict['delta_r_M'],
-            'delta_anion': contrib_dict['delta_anion'],
-            'chem_expansion_model': contrib_dict['chem_expansion']
+            'r_A_curr': r_A_curr,
+            'r_B_curr': r_B_curr,
+            'r_M_curr': r_M_curr,
+            'delta_r_A': delta_r_A,
+            'delta_r_B': delta_r_B,
+            'delta_r_M': delta_r_M,
+            'delta_anion': delta_anion,
+            'chem_expansion_model': chem_expansion_model
         }
         
         self.results['temperature_properties'] = result
