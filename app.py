@@ -955,7 +955,8 @@ class InverseProblemSolver:
         """
         Calculate theoretical beta_chem based on ionic radii model.
         """
-        beta_chem_theory = self.radius_model.calculate_beta_chem_theoretical()
+        beta_chem_theory = (self.radius_model.r_M_base - self.radius_model.r_B_base) / (self.radius_model.r_B_base + self.radius_model.r_O) + \
+                           (self.r_V_eff - self.radius_model.r_O) / (4 * (self.radius_model.r_B_base + self.radius_model.r_O))
         
         # Compare with experimental
         deviation_pct = (beta_chem_theory - self.beta_chem_exp) / self.beta_chem_exp * 100
