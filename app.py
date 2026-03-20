@@ -795,6 +795,28 @@ class IonicRadiusModel:
         r_V_eff = 4 * (self.r_B_base + self.r_O) * (beta_per_vacancy - cation_contrib) + self.r_O
         return r_V_eff
 
+    def calculate_beta_chem_theoretical(self) -> float:
+        """
+        Calculate theoretical chemical expansion coefficient using ionic radii model.
+        
+        Based on the equation:
+        β = (r_M_base - r_B_base)/(r_B_base + r_O) + (r_V_eff - r_O)/(4*(r_B_base + r_O))
+        
+        Returns:
+        --------
+        float
+            Theoretical chemical expansion coefficient
+        """
+        # Use default oxygen vacancy radius if not calculated yet
+        r_V_eff = getattr(self, 'r_V_eff', 1.20)  # typical value in Å
+        
+        # Calculate theoretical beta
+        cation_contrib = (self.r_M_base - self.r_B_base) / (self.r_B_base + self.r_O)
+        vacancy_contrib = (r_V_eff - self.r_O) / (4 * (self.r_B_base + self.r_O))
+        
+        beta_theory = cation_contrib + vacancy_contrib
+        return beta_theory
+
 # ============================================
 # INVERSE PROBLEM CALCULATIONS (UPDATED)
 # ============================================
