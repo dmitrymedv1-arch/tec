@@ -2533,7 +2533,7 @@ def main():
                         value=acc_value,
                         format="%.4f",
                         disabled=True,
-                        help="Значение автоматически берется из параметра [Acc] в Stage 1"
+                        help="The value is automatically taken from the parameter [Acc] in Stage 1"
                     )
                     st.session_state.composition['x'] = acc_value
                 
