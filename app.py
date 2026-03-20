@@ -2491,6 +2491,9 @@ def main():
                                         if not st.session_state.model_params[param_name]['fixed']:
                                             fitted_value = st.session_state.fit_results['params'][param_name]
                                             st.session_state.model_params[param_name]['value'] = fitted_value
+                                        else:
+                                            current_value = st.session_state.model_params[param_name]['value']
+                                            st.session_state.model_params[param_name]['value'] = current_value
                                     
                                     st.success(f"✅ Fitting completed in {end_time - start_time:.2f} seconds")
                                     st.rerun()
