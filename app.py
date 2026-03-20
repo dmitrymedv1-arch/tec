@@ -499,7 +499,7 @@ def format_composition(A: str, B: str, M: str, x: float) -> str:
         b_sub = f"{1-x:.2f}"
         m_sub = f"{x:.2f}"
 
-        return f"{A}{B} {1-x:.2f} {M} {x:.2f} O₃₋ₓ/₂"
+        return f"{A}{B}$_{{{1-x:.2f}}}${M}$_{{{x:.2f}}}$O$_{{3-x/2}}$"
 
 # ============================================
 # INVERSE PROBLEM CALCULATIONS
