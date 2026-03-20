@@ -496,10 +496,10 @@ def format_composition(A: str, B: str, M: str, x: float) -> str:
     elif x == 1:
         return f"{A}{M}O₂.₅"
     else:
-        # Format with proper subscripts
-        b_sub = f"{1-x:.2f}".replace('.', '').lstrip('0')
-        m_sub = f"{x:.2f}".replace('.', '').lstrip('0')
-        return f"{A}{B} $_{{{b_sub}}}$ {M} $_{{{m_sub}}}$ O $_{{3-x/2}}$"
+        b_sub = f"{1-x:.2f}"
+        m_sub = f"{x:.2f}"
+
+        return f"{A}{B} {1-x:.2f} {M} {x:.2f} O₃₋ₓ/₂"
 
 # ============================================
 # INVERSE PROBLEM CALCULATIONS
