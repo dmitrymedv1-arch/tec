@@ -2495,7 +2495,7 @@ def main():
                     x_value = st.slider(
                         "x (acceptor concentration)",
                         min_value=0.01,
-                        max_value=0.3,
+                        max_value=0.99,
                         value=st.session_state.composition['x'],
                         step=0.01,
                         format="%.2f"
