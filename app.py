@@ -1002,11 +1002,11 @@ def create_inverse_plot1_cached(inverse_results: Dict[str, Any],
     fig.set_dpi(600)
     return fig
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False, version="2")
 def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
                                 composition: str,
                                 style: Dict[str, Any],
-                                A: str, B: str, M: str) -> plt.Figure:  # Добавлены параметры A, B, M
+                                A: str, B: str, M: str) -> plt.Figure:
     """
     Create plot 14: Defect parameters comparison
     """
@@ -1039,9 +1039,9 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
     
     # Plot 2: Lattice contributions
     if theo_res:
-        L_dry = theo_res.get('L_wet_exp', 0) - theo_res.get('L_wet_theory', 0) + theo_res.get('L_wet_theory', 0)
+        L_dry = theo_res.get('L_dry', 0)
         categories = ['Dry state', 'Hydrated (theory)', 'Hydrated (exp)']
-        values = [theo_res.get('L_dry', 0) if 'L_dry' in theo_res else 0,
+        values = [L_dry,
                   theo_res.get('L_wet_theory', 0),
                   theo_res.get('L_wet_exp', 0)]
         
@@ -1068,9 +1068,9 @@ def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
         
         # Draw circles representing ions
         ax3.add_patch(Circle((0.2, 0.6), r_A/5, color=style.get('thermal_line_color', '#1f77b4'),
-                             alpha=0.8, label=f'A ({A})'))  # Исправлено: self.A -> A
+                             alpha=0.8, label=f'A ({A})'))  # Fixed: self.A -> A
         ax3.add_patch(Circle((0.5, 0.3), r_B/5, color=style.get('chemical_line_color', '#d62728'),
-                             alpha=0.8, label=f'B ({B}/{M})'))  # Исправлено: self.B, self.M -> B, M
+                             alpha=0.8, label=f'B ({B}/{M})'))  # Fixed: self.B, self.M -> B, M
         ax3.add_patch(Circle((0.8, 0.6), r_O/5, color='red', alpha=0.8, label='O'))
         
         ax3.set_xlim(0, 1)
