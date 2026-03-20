@@ -2226,7 +2226,8 @@ def initialize_session_state():
         'data_loaded': False,
         'plots_generated': False,
         'fitting_complete': False,
-        'inverse_complete': False
+        'inverse_complete': False,
+        'fit_timestamp': 0
     }
     
     for key, value in defaults.items():
@@ -2339,48 +2340,48 @@ def main():
                             "[Acc]", 
                             value=st.session_state.model_params['Acc']['value'],
                             step=0.01, format="%.4f",
-                            key="acc_input_stage1"
+                            key=f"acc_input_{st.session_state.model_params['Acc']['value']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         acc_fixed = st.checkbox(
                             "Fix", 
                             value=st.session_state.model_params['Acc']['fixed'],
-                            key="acc_fix_stage1"
+                            key=f"acc_fix_{st.session_state.model_params['Acc']['fixed']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         
                         alpha_value = st.number_input(
                             "α·10⁶", 
                             value=st.session_state.model_params['alpha_1e6']['value'],
                             step=0.1, format="%.4f",
-                            key="alpha_input_stage1"
+                            key=f"alpha_input_{st.session_state.model_params['alpha_1e6']['value']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         alpha_fixed = st.checkbox(
                             "Fix", 
                             value=st.session_state.model_params['alpha_1e6']['fixed'],
-                            key="alpha_fix_stage1"
+                            key=f"alpha_fix_{st.session_state.model_params['alpha_1e6']['fixed']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         
                         beta_value = st.number_input(
                             "β", 
                             value=st.session_state.model_params['beta']['value'],
                             step=0.001, format="%.4f",
-                            key="beta_input_stage1"
+                            key=f"beta_input_{st.session_state.model_params['beta']['value']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         beta_fixed = st.checkbox(
                             "Fix", 
                             value=st.session_state.model_params['beta']['fixed'],
-                            key="beta_fix_stage1"
+                            key=f"beta_fix_{st.session_state.model_params['beta']['fixed']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         
                         dH_value = st.number_input(
                             "ΔH (kJ/mol)", 
                             value=st.session_state.model_params['dH']['value'],
                             step=1.0, format="%.2f",
-                            key="dh_input_stage1"
+                            key=f"dH_input_{st.session_state.model_params['dH']['value']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         dH_fixed = st.checkbox(
                             "Fix", 
                             value=st.session_state.model_params['dH']['fixed'],
-                            key="dh_fix_stage1"
+                            key=f"dH_fix_{st.session_state.model_params['dH']['fixed']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                     
                     with col2:
@@ -2388,36 +2389,36 @@ def main():
                             "ΔS (J/mol·K)", 
                             value=st.session_state.model_params['dS']['value'],
                             step=1.0, format="%.2f",
-                            key="ds_input_stage1"
+                            key=f"dS_input_{st.session_state.model_params['dS']['value']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         dS_fixed = st.checkbox(
                             "Fix", 
                             value=st.session_state.model_params['dS']['fixed'],
-                            key="ds_fix_stage1"
+                            key=f"dS_fix_{st.session_state.model_params['dS']['fixed']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         
                         pH2O_value = st.number_input(
                             "pH₂O", 
                             value=st.session_state.model_params['pH2O']['value'],
                             step=0.001, format="%.4f",
-                            key="ph2o_input_stage1"
+                            key=f"pH2O_input_{st.session_state.model_params['pH2O']['value']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         pH2O_fixed = st.checkbox(
                             "Fix", 
                             value=st.session_state.model_params['pH2O']['fixed'],
-                            key="ph2o_fix_stage1"
+                            key=f"pH2O_fix_{st.session_state.model_params['pH2O']['fixed']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         
                         residue_value = st.number_input(
                             "Residue", 
                             value=st.session_state.model_params['residue']['value'],
                             step=0.0001, format="%.6f",
-                            key="residue_input_stage1"
+                            key=f"residue_input_{st.session_state.model_params['residue']['value']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                         residue_fixed = st.checkbox(
                             "Fix", 
                             value=st.session_state.model_params['residue']['fixed'],
-                            key="residue_fix_stage1"
+                            key=f"residue_fix_{st.session_state.model_params['residue']['fixed']}_{st.session_state.get('fit_timestamp', 0)}"
                         )
                     
                     fit_button = st.form_submit_button("🚀 Fit Model", type="primary", use_container_width=True)
@@ -2487,18 +2488,13 @@ def main():
                                     st.session_state.current_stage = 1
                                     st.session_state.inverse_complete = False
                                     
-                                    if 'fit_timestamp' not in st.session_state:
-                                        st.session_state.fit_timestamp = 0
-                                    st.session_state.fit_timestamp += 1
-                                    
                                     for param_name in ['Acc', 'alpha_1e6', 'beta', 'dH', 'dS', 'pH2O', 'residue']:
                                         if not st.session_state.model_params[param_name]['fixed']:
                                             fitted_value = st.session_state.fit_results['params'][param_name]
                                             st.session_state.model_params[param_name]['value'] = fitted_value
-                                            print(f"Updated {param_name} from {st.session_state.model_params[param_name]['value']} to {fitted_value}")
-                                        else:
-                                            current_value = st.session_state.model_params[param_name]['value']
-                                            st.session_state.model_params[param_name]['value'] = current_value
+                                    
+                                    # Обновляем timestamp для принудительного обновления формы
+                                    st.session_state.fit_timestamp += 1
                                     
                                     st.success(f"✅ Fitting completed in {end_time - start_time:.2f} seconds")
                                     st.rerun()
