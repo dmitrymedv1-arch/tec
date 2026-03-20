@@ -2297,59 +2297,97 @@ def main():
             with st.expander("🔧 **Stage 1: Model Parameters**", expanded=True):
                 st.markdown("Check 'Fix' to keep parameter constant during fitting")
                 
-                with st.form("model_params_form"):
+                # Use a unique form key based on session state to prevent duplicates
+                form_key = f"model_params_form_{hash(str(st.session_state.model_params))}"
+                
+                with st.form(form_key):
                     col1, col2 = st.columns(2)
                     
                     with col1:
                         acc_value = st.number_input(
                             "[Acc]", 
                             value=st.session_state.model_params['Acc']['value'],
-                            step=0.01, format="%.4f"
+                            step=0.01, format="%.4f",
+                            key="acc_input_stage1"
                         )
-                        acc_fixed = st.checkbox("Fix", value=st.session_state.model_params['Acc']['fixed'])
+                        acc_fixed = st.checkbox(
+                            "Fix", 
+                            value=st.session_state.model_params['Acc']['fixed'],
+                            key="acc_fix_stage1"
+                        )
                         
                         alpha_value = st.number_input(
                             "α·10⁶", 
                             value=st.session_state.model_params['alpha_1e6']['value'],
-                            step=0.1, format="%.4f"
+                            step=0.1, format="%.4f",
+                            key="alpha_input_stage1"
                         )
-                        alpha_fixed = st.checkbox("Fix", value=st.session_state.model_params['alpha_1e6']['fixed'])
+                        alpha_fixed = st.checkbox(
+                            "Fix", 
+                            value=st.session_state.model_params['alpha_1e6']['fixed'],
+                            key="alpha_fix_stage1"
+                        )
                         
                         beta_value = st.number_input(
                             "β", 
                             value=st.session_state.model_params['beta']['value'],
-                            step=0.001, format="%.4f"
+                            step=0.001, format="%.4f",
+                            key="beta_input_stage1"
                         )
-                        beta_fixed = st.checkbox("Fix", value=st.session_state.model_params['beta']['fixed'])
+                        beta_fixed = st.checkbox(
+                            "Fix", 
+                            value=st.session_state.model_params['beta']['fixed'],
+                            key="beta_fix_stage1"
+                        )
                         
                         dH_value = st.number_input(
                             "ΔH (kJ/mol)", 
                             value=st.session_state.model_params['dH']['value'],
-                            step=1.0, format="%.2f"
+                            step=1.0, format="%.2f",
+                            key="dh_input_stage1"
                         )
-                        dH_fixed = st.checkbox("Fix", value=st.session_state.model_params['dH']['fixed'])
+                        dH_fixed = st.checkbox(
+                            "Fix", 
+                            value=st.session_state.model_params['dH']['fixed'],
+                            key="dh_fix_stage1"
+                        )
                     
                     with col2:
                         dS_value = st.number_input(
                             "ΔS (J/mol·K)", 
                             value=st.session_state.model_params['dS']['value'],
-                            step=1.0, format="%.2f"
+                            step=1.0, format="%.2f",
+                            key="ds_input_stage1"
                         )
-                        dS_fixed = st.checkbox("Fix", value=st.session_state.model_params['dS']['fixed'])
+                        dS_fixed = st.checkbox(
+                            "Fix", 
+                            value=st.session_state.model_params['dS']['fixed'],
+                            key="ds_fix_stage1"
+                        )
                         
                         pH2O_value = st.number_input(
                             "pH₂O", 
                             value=st.session_state.model_params['pH2O']['value'],
-                            step=0.001, format="%.4f"
+                            step=0.001, format="%.4f",
+                            key="ph2o_input_stage1"
                         )
-                        pH2O_fixed = st.checkbox("Fix", value=st.session_state.model_params['pH2O']['fixed'])
+                        pH2O_fixed = st.checkbox(
+                            "Fix", 
+                            value=st.session_state.model_params['pH2O']['fixed'],
+                            key="ph2o_fix_stage1"
+                        )
                         
                         residue_value = st.number_input(
                             "Residue", 
                             value=st.session_state.model_params['residue']['value'],
-                            step=0.0001, format="%.6f"
+                            step=0.0001, format="%.6f",
+                            key="residue_input_stage1"
                         )
-                        residue_fixed = st.checkbox("Fix", value=st.session_state.model_params['residue']['fixed'])
+                        residue_fixed = st.checkbox(
+                            "Fix", 
+                            value=st.session_state.model_params['residue']['fixed'],
+                            key="residue_fix_stage1"
+                        )
                     
                     fit_button = st.form_submit_button("🚀 Fit Model", type="primary", use_container_width=True)
                     
@@ -2357,6 +2395,7 @@ def main():
                         if st.session_state.experimental_data is None:
                             st.error("Please load data first!")
                         else:
+                            # Обновление параметров
                             param_updates = [
                                 ('Acc', acc_value, acc_fixed),
                                 ('alpha_1e6', alpha_value, alpha_fixed),
@@ -2368,7 +2407,8 @@ def main():
                             ]
                             
                             for param_name, value, is_fixed in param_updates:
-                                update_model_param(param_name, value, is_fixed)
+                                st.session_state.model_params[param_name]['value'] = value
+                                st.session_state.model_params[param_name]['fixed'] = is_fixed
                             
                             fixed_params = {}
                             initial_guess = {}
