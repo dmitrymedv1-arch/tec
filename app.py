@@ -1002,7 +1002,7 @@ def create_inverse_plot1_cached(inverse_results: Dict[str, Any],
     fig.set_dpi(600)
     return fig
 
-@st.cache_data(ttl=3600, show_spinner=False, version="2")
+@st.cache_data(ttl=3600, show_spinner=False)
 def create_inverse_plot2_cached(inverse_results: Dict[str, Any],
                                 composition: str,
                                 style: Dict[str, Any],
