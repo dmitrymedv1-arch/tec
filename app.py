@@ -1059,10 +1059,15 @@ class InverseProblemSolver:
         delta_anion = oh * (self.r_OH_table - self.r_O)
         
         # Calculate total chemical expansion from model
-        # S = r_A + (1-x)*r_B + x*r_M + (3-x/2)*r_O + y*(r_OH - r_O)
+        # S = r_A + (1-x)*r_B + x*r_M + (3-x/2)*r_O + y*r_OH
         S_dry = self.S0
         S_wet = r_A_curr + (1 - self.x) * r_B_curr + self.x * r_M_curr + (3 - self.delta_dry) * self.r_O + oh * self.r_OH_table
-        chem_expansion_model = (S_wet - S_dry) / (3 * (self.r_B_base + self.r_O))
+        
+        # Use base radii from radius_model
+        r_B_base = self.radius_model.r_B_base
+        r_O_base = self.r_O
+        
+        chem_expansion_model = (S_wet - S_dry) / (3 * (r_B_base + r_O_base))
         
         # Combine results
         result = {
