@@ -134,7 +134,7 @@ def calculate_oh_cached(T: np.ndarray, Acc: float, dH: float, dS: float, pH2O: f
     Khydr = np.exp(-dH * 1000 / (R * T_K) + dS / R)
     
     A = Khydr * pH2O
-    oh = -A/2 + np.sqrt(A * Acc + (A/2)**2)
+    oh = (3*A - np.sqrt(A * (9*A - 6*A*Acc + A*Acc**2 + 24*Acc - 4*Acc**2))) / (A - 4)
     return oh, Khydr
 
 @st.cache_data(ttl=3600, show_spinner=False)
