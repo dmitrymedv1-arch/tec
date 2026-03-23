@@ -49,175 +49,6 @@ st.set_page_config(
 )
 
 # ============================================
-# НОВЫЙ КЛАСС: БАЗА ДАННЫХ ИОННЫХ РАДИУСОВ
-# ============================================
-
-class IonicRadiusDatabase:
-    """База данных ионных радиусов с возможностью экстраполяции"""
-    
-    def __init__(self):
-        # База данных радиусов (координация: радиус в Å)
-        self.radii_data = {
-            # A-site элементы (обычно 2+)
-            'Ca': {6: 1.00, 7: 1.06, 8: 1.12, 9: 1.18, 10: 1.23, 12: 1.34},
-            'Sr': {6: 1.18, 7: 1.21, 8: 1.26, 9: 1.31, 10: 1.36, 12: 1.44},
-            'Ba': {6: 1.35, 7: 1.38, 8: 1.42, 9: 1.47, 10: 1.52, 11: 1.57, 12: 1.61},
-            'La': {6: 1.032, 7: 1.10, 8: 1.16, 9: 1.216, 10: 1.27, 12: 1.36},  # La3+
-            
-            # B-site элементы (обычно 4+)
-            'Ce': {6: 0.87, 8: 0.97, 10: 1.07, 12: 1.14},  # Ce4+
-            'Zr': {4: 0.59, 5: 0.66, 6: 0.72, 7: 0.78, 8: 0.84, 9: 0.89},  # Zr4+
-            'Sn': {4: 0.55, 5: 0.62, 6: 0.69, 7: 0.75, 8: 0.81},  # Sn4+
-            'Ti': {4: 0.42, 5: 0.51, 6: 0.605, 8: 0.74},  # Ti4+
-            'Hf': {4: 0.58, 6: 0.71, 7: 0.76, 8: 0.83},  # Hf4+
-            
-            # Акцепторы на B-site (обычно 3+)
-            'Al': {4: 0.39, 5: 0.48, 6: 0.535},  # Al3+
-            'Ga': {4: 0.47, 5: 0.55, 6: 0.62},  # Ga3+
-            'In': {4: 0.62, 6: 0.80, 8: 0.92},  # In3+
-            'Sc': {6: 0.745, 8: 0.87},  # Sc3+
-            'Y': {6: 0.90, 8: 1.019, 9: 1.075},  # Y3+
-            'Yb': {6: 0.868, 8: 0.985, 9: 1.042},  # Yb3+
-            'Ho': {6: 0.901, 8: 1.015, 9: 1.072},  # Ho3+
-            'Dy': {6: 0.912, 8: 1.027, 9: 1.083},  # Dy3+
-            'Gd': {6: 0.938, 8: 1.053, 9: 1.107},  # Gd3+
-            'Sm': {6: 0.958, 8: 1.079, 9: 1.132},  # Sm3+
-            'Mg': {4: 0.57, 5: 0.66, 6: 0.72, 8: 0.89},  # Mg2+ (для La-содержащих)
-            'Zn': {4: 0.60, 5: 0.68, 6: 0.74, 8: 0.90},  # Zn2+ (для La-содержащих)
-            
-            # Анионы
-            'O': {2: 1.35, 3: 1.36, 4: 1.38, 6: 1.40, 8: 1.42},
-            'OH': {2: 1.32, 3: 1.34, 4: 1.35, 6: 1.37},
-        }
-    
-    def get_radius(self, element: str, cn: float, charge: Optional[int] = None) -> float:
-        """Получить радиус для заданного элемента и координационного числа с экстраполяцией"""
-        if element not in self.radii_data:
-            raise ValueError(f"Element {element} not in database")
-        
-        radii_dict = self.radii_data[element]
-        
-        # Прямое попадание
-        if cn in radii_dict:
-            return radii_dict[cn]
-        
-        # Экстраполяция/интерполяция
-        available_cns = sorted(radii_dict.keys())
-        
-        # Если запрашиваемое CN меньше минимального - экстраполяция вниз
-        if cn < available_cns[0]:
-            return self._extrapolate_lower(cn, available_cns, radii_dict)
-        
-        # Если больше максимального - экстраполяция вверх
-        if cn > available_cns[-1]:
-            return self._extrapolate_upper(cn, available_cns, radii_dict)
-        
-        # Интерполяция между ближайшими точками
-        return self._interpolate(cn, available_cns, radii_dict)
-    
-    def _interpolate(self, cn: float, available_cns: list, radii_dict: dict) -> float:
-        """Линейная интерполяция"""
-        for i in range(len(available_cns) - 1):
-            if available_cns[i] <= cn <= available_cns[i + 1]:
-                r1 = radii_dict[available_cns[i]]
-                r2 = radii_dict[available_cns[i + 1]]
-                t = (cn - available_cns[i]) / (available_cns[i + 1] - available_cns[i])
-                return r1 + t * (r2 - r1)
-        return radii_dict[available_cns[-1]]
-    
-    def _extrapolate_lower(self, cn: float, available_cns: list, radii_dict: dict) -> float:
-        """Экстраполяция в область меньших CN"""
-        # Используем два ближайших значения для линейной экстраполяции
-        cn1, cn2 = available_cns[0], available_cns[1]
-        r1, r2 = radii_dict[cn1], radii_dict[cn2]
-        slope = (r2 - r1) / (cn2 - cn1)
-        return r1 + slope * (cn - cn1)
-    
-    def _extrapolate_upper(self, cn: float, available_cns: list, radii_dict: dict) -> float:
-        """Экстраполяция в область больших CN"""
-        cn1, cn2 = available_cns[-2], available_cns[-1]
-        r1, r2 = radii_dict[cn1], radii_dict[cn2]
-        slope = (r2 - r1) / (cn2 - cn1)
-        return r2 + slope * (cn - cn2)
-
-# ============================================
-# НОВЫЙ КЛАСС: КРИСТАЛЛОХИМИЧЕСКАЯ МОДЕЛЬ
-# ============================================
-
-class CrystalChemistryModel:
-    """Модель для расчета параметра решетки на основе ионных радиусов"""
-    
-    def __init__(self, A_element: str = 'Ba', B_element: str = 'Zr', Acc_element: str = 'Y'):
-        self.radius_db = IonicRadiusDatabase()
-        self.A_element = A_element
-        self.B_element = B_element
-        self.Acc_element = Acc_element
-        self.r_O = 1.38  # Радиус кислорода, CN=4
-        self.r_OH = 1.35  # Радиус OH группы, CN=4 (можно уточнять)
-    
-    def calculate_CN(self, x: float, y: float) -> Tuple[float, float]:
-        """Рассчитать координационные числа"""
-        CN_B = 6 - x + y
-        CN_A = 12 - 2 * x + 2 * y
-        return CN_B, CN_A
-    
-    def calculate_cation_radius(self, CN_B: float, CN_A: float, x: float) -> Tuple[float, float]:
-        """Рассчитать эффективный радиус катионов"""
-        # Радиус B-site катиона (средневзвешенный)
-        r_B_host = self.radius_db.get_radius(self.B_element, CN_B)
-        r_B_acc = self.radius_db.get_radius(self.Acc_element, CN_B)
-        r_B = (1 - x) * r_B_host + x * r_B_acc
-        
-        # Радиус A-site катиона
-        r_A = self.radius_db.get_radius(self.A_element, CN_A)
-        
-        return r_B, r_A
-    
-    def calculate_anion_contribution(self, x: float, y: float, r_V: Optional[float] = None) -> Tuple[float, float, float]:
-        """Рассчитать вклад анионной подрешетки"""
-        # Концентрации
-        O_O = 3 - (x - y) / 2
-        V_O = (x - y) / 2
-        
-        # Если r_V не задан, используем эффективное значение
-        if r_V is None:
-            # По умолчанию вакансия "сжимает" решетку
-            r_V = 0.5 * self.r_O
-        
-        # Линейный вклад анионов (формула из анализа)
-        L_anion = (2 / 3) * (O_O * self.r_O + V_O * r_V + y * self.r_OH)
-        
-        return L_anion, O_O, V_O
-    
-    def calculate_lattice_parameter(self, x: float, y: float, r_V: Optional[float] = None) -> Tuple[float, float, float, float]:
-        """Рассчитать параметр решетки"""
-        CN_B, CN_A = self.calculate_CN(x, y)
-        r_B, r_A = self.calculate_cation_radius(CN_B, CN_A, x)
-        L_anion, O_O, V_O = self.calculate_anion_contribution(x, y, r_V)
-        
-        a = 2 * r_B + L_anion
-        return a, r_B, r_A, L_anion
-    
-    def calculate_beta_components(self, x: float, y: float, r_V: float) -> Tuple[float, float, float]:
-        """Рассчитать вклад каждого компонента в β"""
-        # ∂r_B/∂y (численное дифференцирование)
-        dy = max(0.001, y * 0.01)
-        CN_B_plus, _ = self.calculate_CN(x, y + dy)
-        CN_B_minus, _ = self.calculate_CN(x, max(0, y - dy))
-        
-        r_B_plus, _ = self.calculate_cation_radius(CN_B_plus, 0, x)
-        r_B_minus, _ = self.calculate_cation_radius(CN_B_minus, 0, x)
-        dr_B_dy = (r_B_plus - r_B_minus) / (2 * dy)
-        
-        # Вклад от катионов
-        beta_cation = 2 * dr_B_dy
-        
-        # Вклад от анионов (из формулы: β = 2·dr_B/dy + (2/3)·(0.5·r_O + 0.5·r_V + r_OH))
-        beta_anion = (2 / 3) * (0.5 * self.r_O + 0.5 * r_V + self.r_OH)
-        
-        return beta_cation, beta_anion, beta_cation + beta_anion
-
-# ============================================
 # ИНИЦИАЛИЗАЦИЯ СЕССИОННОГО СОСТОЯНИЯ
 # ============================================
 
@@ -251,17 +82,9 @@ def initialize_session_state():
             'pH2O': {'value': 0.083, 'fixed': False},
             'residue': {'value': 0.0, 'fixed': False}
         },
-        'crystal_params': {
-            'A_element': 'Ba',
-            'B_element': 'Zr',
-            'Acc_element': 'Y',
-            'r_OH_fixed': 1.35,
-            'use_fixed_oh_radius': True
-        },
         'data_loaded': False,
         'plots_generated': False,
-        'fitting_complete': False,
-        'stage2_complete': False
+        'fitting_complete': False
     }
     
     for key, value in defaults.items():
@@ -304,27 +127,15 @@ def parse_data_cached(data_string: str) -> np.ndarray:
     return np.array(data)
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def calculate_oh_corrected(T: np.ndarray, Acc: float, dH: float, dS: float, pH2O: float) -> Tuple[np.ndarray, np.ndarray]:
-    """Корректный расчет [OH] из полного уравнения (cached)"""
+def calculate_oh_cached(T: np.ndarray, Acc: float, dH: float, dS: float, pH2O: float) -> Tuple[np.ndarray, np.ndarray]:
+    """Calculate [OH] for given temperatures (cached)"""
     T_K = T + 273.15
     R = 8.314
-    Kw = np.exp(-dH * 1000 / (R * T_K) + dS / R)
+    Khydr = np.exp(-dH * 1000 / (R * T_K) + dS / R)
     
-    # Полная формула: [OH] = (3Kw*pH2O - sqrt(Kw*pH2O*(9Kw*pH2O - 6Kw*pH2O*[Acc] + Kw*pH2O*[Acc]^2 + 24[Acc] - 4[Acc]^2))) / (Kw*pH2O - 4)
-    A = Kw * pH2O
-    term = 9 * A - 6 * A * Acc + A * Acc**2 + 24 * Acc - 4 * Acc**2
-    term = np.maximum(term, 0)  # Защита от отрицательных значений
-    
-    denominator = A - 4
-    # Защита от деления на ноль
-    denominator = np.where(np.abs(denominator) < 1e-10, 1e-10, denominator)
-    
-    oh = (3 * A - np.sqrt(A * term)) / denominator
-    
-    # Физические ограничения
-    oh = np.clip(oh, 0, Acc)
-    
-    return oh, Kw
+    A = Khydr * pH2O
+    oh = (3*A - np.sqrt(A * (9*A - 6*A*Acc + A*Acc**2 + 24*Acc - 4*Acc**2))) / (A - 4)
+    return oh, Khydr
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def calculate_tec_cached(T: np.ndarray, dl: np.ndarray) -> np.ndarray:
@@ -346,10 +157,11 @@ def model_func_cached(T: np.ndarray, Acc: float, alpha_1e6: float, beta: float,
                      dH: float, dS: float, pH2O: float, residue: float, 
                      T_start: float, oh_start: float) -> np.ndarray:
     """Model function for fitting (cached calculation)"""
-    oh, _ = calculate_oh_corrected(T, Acc, dH, dS, pH2O)
+    oh, _ = calculate_oh_cached(T, Acc, dH, dS, pH2O)
     dl_dl0 = (alpha_1e6/1e6) * (T - T_start) + beta * (oh - oh_start) + residue
     return dl_dl0
 
+@st.cache_data(ttl=3600, show_spinner=False)
 @st.cache_data(ttl=3600, show_spinner=False)
 def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any], 
                     initial_guess: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -367,7 +179,7 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
         else:
             current_params[name] = initial_guess[name]
     
-    oh_start, _ = calculate_oh_corrected(
+    oh_start, _ = calculate_oh_cached(
         np.array([T_start]), 
         current_params['Acc'],
         current_params['dH'],
@@ -426,20 +238,28 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
         rmse = np.sqrt(mse)
         r2 = 1 - np.sum(residuals**2) / np.sum((dl_data - np.mean(dl_data))**2)
         
+        # ИСПРАВЛЕННОЕ ВЫЧИСЛЕНИЕ χ²:
+        # Для моделей регрессии без известных погрешностей измерений используется:
+        # χ²_red = Σ(y_i - ŷ_i)² / (N - p)
+        # где N - количество точек данных, p - количество свободных параметров
         N = len(dl_data)
-        p = len(vary_params)
+        p = len(vary_params)  # количество подгоняемых параметров
         
         if N > p:
-            chi2 = np.sum(residuals**2) / (N - p)
+            chi2 = np.sum(residuals**2) / (N - p)  # приведенный χ²
         else:
-            chi2 = np.nan
+            chi2 = np.nan  # недостаточно данных
+        
+        # Альтернативно, если хотите классический χ²:
+        # Предполагаем одинаковые погрешности σ = rmse
+        # chi2 = np.sum(residuals**2) / (rmse**2) if rmse > 0 else np.nan
         
         # Calculate TEC for both experimental and model data
         tec_exp = calculate_tec_cached(T_data, dl_data)
         tec_model = calculate_tec_cached(T_data, dl_model)
         
         # Calculate proton concentration
-        oh, _ = calculate_oh_corrected(T_data, result_params['Acc'], result_params['dH'], 
+        oh, _ = calculate_oh_cached(T_data, result_params['Acc'], result_params['dH'], 
                                   result_params['dS'], result_params['pH2O'])
         
         # Calculate individual contributions
@@ -456,7 +276,7 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
             'rmse': rmse,
             'r2': r2,
             'chi2': chi2,
-            'reduced_chi2': chi2,
+            'reduced_chi2': chi2,  # добавим для ясности
             'N_points': N,
             'n_free_params': p,
             'T_start': T_start,
@@ -478,225 +298,6 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
         return None
 
 # ============================================
-# НОВАЯ ФУНКЦИЯ: ДВУХЭТАПНЫЙ ФИТИНГ С ОЦЕНКОЙ РАДИУСОВ
-# ============================================
-
-def two_stage_fitting_with_radii(stage1_results: Dict[str, Any], 
-                                  A_element: str, B_element: str, Acc_element: str,
-                                  r_OH_fixed: float, use_fixed_oh_radius: bool) -> Dict[str, Any]:
-    """
-    Второй этап фитинга: оценка эффективных ионных радиусов на основе β
-    
-    Args:
-        stage1_results: Результаты первого этапа фитинга
-        A_element: Элемент в A-позиции
-        B_element: Элемент в B-позиции (хост)
-        Acc_element: Акцепторная примесь
-        r_OH_fixed: Фиксированное значение радиуса OH группы
-        use_fixed_oh_radius: Использовать фиксированный радиус OH или варьировать
-    
-    Returns:
-        Обновленный словарь с результатами оценки радиусов
-    """
-    
-    # Получаем ключевые параметры из этапа 1
-    beta_exp = stage1_results['params']['beta']
-    x = stage1_results['params']['Acc']
-    T = stage1_results['T_data']
-    dH = stage1_results['params']['dH']
-    dS = stage1_results['params']['dS']
-    pH2O = stage1_results['params']['pH2O']
-    
-    # Рассчитываем [OH] для средней температуры
-    T_mid = np.mean(T)
-    y_mid, _ = calculate_oh_corrected(T_mid, x, dH, dS, pH2O)
-    
-    # Создаем кристаллохимическую модель
-    crystal_model = CrystalChemistryModel(A_element, B_element, Acc_element)
-    
-    # Устанавливаем радиус OH
-    if use_fixed_oh_radius:
-        crystal_model.r_OH = r_OH_fixed
-    
-    # Рассчитываем компоненты β (сначала с временным r_V=0 для получения катионной части)
-    beta_cation, beta_anion_temp, beta_total_temp = crystal_model.calculate_beta_components(x, y_mid, 0.5 * crystal_model.r_O)
-    
-    # Решаем уравнение для r_V
-    # beta_exp = beta_cation + (2/3) * (0.5*r_O + 0.5*r_V + r_OH)
-    r_O = crystal_model.r_O
-    r_OH = crystal_model.r_OH
-    
-    # Пересчитываем beta_cation более точно с учетом реального y_mid
-    dy = max(0.001, y_mid * 0.01)
-    CN_B_plus, _ = crystal_model.calculate_CN(x, y_mid + dy)
-    CN_B_minus, _ = crystal_model.calculate_CN(x, max(0, y_mid - dy))
-    
-    r_B_plus, _ = crystal_model.calculate_cation_radius(CN_B_plus, 0, x)
-    r_B_minus, _ = crystal_model.calculate_cation_radius(CN_B_minus, 0, x)
-    dr_B_dy = (r_B_plus - r_B_minus) / (2 * dy)
-    beta_cation_accurate = 2 * dr_B_dy
-    
-    # Вычисляем r_V
-    r_V = (beta_exp - beta_cation_accurate) * 3 / 2 - 0.5 * r_O - r_OH
-    
-    # Рассчитываем параметр решетки для проверки
-    a, r_B, r_A, L_anion = crystal_model.calculate_lattice_parameter(x, y_mid, r_V)
-    
-    # Рассчитываем финальные компоненты β
-    beta_anion_final = (2 / 3) * (0.5 * r_O + 0.5 * r_V + r_OH)
-    beta_total_calc = beta_cation_accurate + beta_anion_final
-    
-    # Добавляем результаты в stage1_results
-    stage1_results['radius_estimation'] = {
-        'r_V': r_V,
-        'r_O': r_O,
-        'r_OH': r_OH,
-        'dr_B_dy': dr_B_dy,
-        'beta_cation': beta_cation_accurate,
-        'beta_anion': beta_anion_final,
-        'beta_total_calc': beta_total_calc,
-        'beta_exp': beta_exp,
-        'beta_difference': beta_exp - beta_total_calc,
-        'x_fitted': x,
-        'y_at_midT': y_mid,
-        'T_mid': T_mid,
-        'r_B': r_B,
-        'r_A': r_A,
-        'L_anion': L_anion,
-        'a_calculated': a,
-        'A_element': A_element,
-        'B_element': B_element,
-        'Acc_element': Acc_element,
-        'use_fixed_oh_radius': use_fixed_oh_radius,
-        'r_OH_fixed_value': r_OH_fixed if use_fixed_oh_radius else None
-    }
-    
-    return stage1_results
-
-# ============================================
-# НОВЫЕ ФУНКЦИИ ДЛЯ СОЗДАНИЯ ГРАФИКОВ (РАДИУСНЫЙ АНАЛИЗ)
-# ============================================
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def create_radius_analysis_plot(radius_results: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
-    """Создать график анализа радиусов"""
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 8))
-    
-    # График 1: Сравнение β компонентов
-    labels = ['Cation\ncontribution', 'Anion\ncontribution', 'Total\n(model)', 'Total\n(experimental)']
-    values = [
-        radius_results['beta_cation'],
-        radius_results['beta_anion'],
-        radius_results['beta_total_calc'],
-        radius_results['beta_exp']
-    ]
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
-    bars = ax1.bar(labels, values, color=colors, alpha=0.7, edgecolor='black', linewidth=1)
-    ax1.set_ylabel('β coefficient', fontweight='bold', fontsize=11)
-    ax1.set_title('Chemical Expansion Coefficient Decomposition', fontweight='bold', fontsize=12)
-    ax1.grid(True, alpha=0.3, axis='y')
-    
-    # Добавляем значения на столбцы
-    for bar, val in zip(bars, values):
-        height = bar.get_height()
-        ax1.text(bar.get_x() + bar.get_width()/2., height,
-                f'{val:.4f}', ha='center', va='bottom', fontsize=9)
-    
-    # График 2: Эффективные радиусы
-    rad_labels = ['O²⁻', 'OH⁻', 'Vₒ••', 'B-site', 'A-site']
-    rad_values = [
-        radius_results['r_O'],
-        radius_results['r_OH'],
-        radius_results['r_V'],
-        radius_results['r_B'],
-        radius_results['r_A']
-    ]
-    colors_rad = ['#1f77b4', '#ff7f0e', '#d62728', '#2ca02c', '#9467bd']
-    ax2.barh(rad_labels, rad_values, color=colors_rad, alpha=0.7, edgecolor='black', linewidth=1)
-    ax2.set_xlabel('Effective Radius (Å)', fontweight='bold', fontsize=11)
-    ax2.set_title('Effective Ionic Radii', fontweight='bold', fontsize=12)
-    ax2.grid(True, alpha=0.3, axis='x')
-    
-    # Добавляем значения
-    for i, (label, val) in enumerate(zip(rad_labels, rad_values)):
-        ax2.text(val + 0.01, i, f'{val:.3f} Å', va='center', fontsize=9)
-    
-    # График 3: Зависимость параметра решетки от [OH] (теоретическая)
-    if 'T_data' in radius_results and 'oh_concentration' in radius_results:
-        T_data = radius_results['T_data']
-        oh_conc = radius_results['oh_concentration']
-        x = radius_results['x_fitted']
-        r_V = radius_results['r_V']
-        
-        # Рассчитываем a для разных y
-        y_range = np.linspace(0, oh_conc.max(), 50)
-        a_values = []
-        for y in y_range:
-            crystal_model = CrystalChemistryModel(
-                radius_results['A_element'],
-                radius_results['B_element'],
-                radius_results['Acc_element']
-            )
-            crystal_model.r_OH = radius_results['r_OH']
-            a, _, _, _ = crystal_model.calculate_lattice_parameter(x, y, r_V)
-            a_values.append(a)
-        
-        ax3.plot(y_range, a_values, 'b-', linewidth=2, label='Model prediction')
-        ax3.scatter(oh_conc, radius_results.get('a_calculated_from_data', a_values[-1] * np.ones_like(oh_conc)), 
-                   c=T_data, cmap=style['cmap_style'], s=50, alpha=0.7, label='From fit')
-        ax3.set_xlabel('[OH] concentration', fontweight='bold', fontsize=11)
-        ax3.set_ylabel('Lattice parameter a (Å)', fontweight='bold', fontsize=11)
-        ax3.set_title('Lattice Parameter vs [OH]', fontweight='bold', fontsize=12)
-        ax3.legend(loc='best')
-        ax3.grid(True, alpha=0.3, linestyle='--')
-        cbar = plt.colorbar(ax3.collections[0], ax=ax3)
-        cbar.set_label('Temperature (°C)', fontweight='bold', fontsize=10)
-    else:
-        ax3.text(0.5, 0.5, 'Insufficient data\nfor this plot', 
-                ha='center', va='center', transform=ax3.transAxes, fontsize=12)
-        ax3.set_title('Lattice Parameter vs [OH]', fontweight='bold', fontsize=12)
-    
-    # График 4: Информация о модели
-    info_text = f"""
-    CRYSTAL CHEMISTRY PARAMETERS:
-    • A-site: {radius_results['A_element']}
-    • B-site: {radius_results['B_element']}
-    • Acceptor: {radius_results['Acc_element']}
-    • x (fitted): {radius_results['x_fitted']:.4f}
-    • y (at T = {radius_results['T_mid']:.1f}°C): {radius_results['y_at_midT']:.4f}
-    
-    RADIUS ANALYSIS:
-    • dr_B/dy: {radius_results['dr_B_dy']:.4f} Å
-    • β_cation: {radius_results['beta_cation']:.4f}
-    • β_anion: {radius_results['beta_anion']:.4f}
-    • β_total (calc): {radius_results['beta_total_calc']:.4f}
-    • β_total (exp): {radius_results['beta_exp']:.4f}
-    • Difference: {radius_results['beta_difference']:.4e}
-    
-    EFFECTIVE RADII:
-    • r_V (vacancy): {radius_results['r_V']:.3f} Å
-    • r_O (oxygen): {radius_results['r_O']:.3f} Å
-    • r_OH (hydroxyl): {radius_results['r_OH']:.3f} Å
-    • r_B (B-site): {radius_results['r_B']:.3f} Å
-    • r_A (A-site): {radius_results['r_A']:.3f} Å
-    
-    LATTICE PARAMETER (at mid T):
-    • a = {radius_results['a_calculated']:.4f} Å
-    • L_anion = {radius_results['L_anion']:.3f} Å
-    
-    OH RADIUS:
-    • {'Fixed' if radius_results['use_fixed_oh_radius'] else 'Fitted'}: {radius_results['r_OH_fixed_value'] if radius_results['use_fixed_oh_radius'] else 'N/A'} Å
-    """
-    ax4.text(0.05, 0.95, info_text, transform=ax4.transAxes,
-             fontsize=8, verticalalignment='top', fontfamily='monospace',
-             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-    ax4.axis('off')
-    
-    plt.tight_layout()
-    fig.set_dpi(600)
-    return fig
-
-# ============================================
 # ФУНКЦИИ ДЛЯ СОЗДАНИЯ ГРАФИКОВ (С КЭШИРОВАНИЕМ)
 # ============================================
 
@@ -713,10 +314,12 @@ def create_plot1_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     dl_model = fit_results['dl_model']
     residuals = fit_results['residuals']
     
+    # ИЗМЕНЕНИЕ: сначала рисуем экспериментальные точки
     ax1.scatter(T, dl_exp, s=style['point_size'], color=style['point_color'], 
                edgecolor='none', 
                label='Experimental', zorder=3, alpha=style['point_alpha'])
     
+    # ИЗМЕНЕНИЕ: потом рисуем модельную линию с более высоким zorder
     ax1.plot(T, dl_model, '-', color=style['model_line_color'], 
             linewidth=style['line_width'], label='Model', zorder=4)
     
@@ -1429,7 +1032,6 @@ def main():
                     st.success(f"Loaded {len(st.session_state.experimental_data)} data points")
                     # Reset fitting state when new data is loaded
                     st.session_state.fitting_complete = False
-                    st.session_state.stage2_complete = False
                     st.session_state.fit_results = None
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
@@ -1444,7 +1046,6 @@ def main():
                     st.success(f"Loaded {len(st.session_state.experimental_data)} data points")
                     # Reset fitting state when new data is loaded
                     st.session_state.fitting_complete = False
-                    st.session_state.stage2_complete = False
                     st.session_state.fit_results = None
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
@@ -1463,7 +1064,6 @@ def main():
                 st.success(f"Loaded {len(st.session_state.experimental_data)} example data points")
                 # Reset fitting state when new data is loaded
                 st.session_state.fitting_complete = False
-                st.session_state.stage2_complete = False
                 st.session_state.fit_results = None
         
         st.divider()
@@ -1483,40 +1083,40 @@ def main():
                     value=st.session_state.model_params['Acc']['value'],
                     step=0.01, 
                     format="%.4f",
-                    key=f"acc_input_{st.session_state.model_params['Acc']['value']}"
+                    key=f"acc_input_{st.session_state.model_params['Acc']['value']}"  # Динамический ключ
                 )
                 acc_fixed = st.checkbox("Fix", value=st.session_state.model_params['Acc']['fixed'], 
-                                       key=f"acc_fix_{st.session_state.model_params['Acc']['fixed']}")
+                                       key=f"acc_fix_{st.session_state.model_params['Acc']['fixed']}")  # Динамический ключ
                 
                 alpha_value = st.number_input(
                     "α·10⁶", 
                     value=st.session_state.model_params['alpha_1e6']['value'],
                     step=0.1, 
                     format="%.4f",
-                    key=f"alpha_input_{st.session_state.model_params['alpha_1e6']['value']}"
+                    key=f"alpha_input_{st.session_state.model_params['alpha_1e6']['value']}"  # Динамический ключ
                 )
                 alpha_fixed = st.checkbox("Fix", value=st.session_state.model_params['alpha_1e6']['fixed'],
-                                         key=f"alpha_fix_{st.session_state.model_params['alpha_1e6']['fixed']}")
+                                         key=f"alpha_fix_{st.session_state.model_params['alpha_1e6']['fixed']}")  # Динамический ключ
                 
                 beta_value = st.number_input(
                     "β", 
                     value=st.session_state.model_params['beta']['value'],
                     step=0.001, 
                     format="%.4f",
-                    key=f"beta_input_{st.session_state.model_params['beta']['value']}"
+                    key=f"beta_input_{st.session_state.model_params['beta']['value']}"  # Динамический ключ
                 )
                 beta_fixed = st.checkbox("Fix", value=st.session_state.model_params['beta']['fixed'],
-                                        key=f"beta_fix_{st.session_state.model_params['beta']['fixed']}")
+                                        key=f"beta_fix_{st.session_state.model_params['beta']['fixed']}")  # Динамический ключ
                 
                 dH_value = st.number_input(
                     "ΔH (kJ/mol)", 
                     value=st.session_state.model_params['dH']['value'],
                     step=1.0, 
                     format="%.2f",
-                    key=f"dH_input_{st.session_state.model_params['dH']['value']}"
+                    key=f"dH_input_{st.session_state.model_params['dH']['value']}"  # Динамический ключ
                 )
                 dH_fixed = st.checkbox("Fix", value=st.session_state.model_params['dH']['fixed'],
-                                      key=f"dH_fix_{st.session_state.model_params['dH']['fixed']}")
+                                      key=f"dH_fix_{st.session_state.model_params['dH']['fixed']}")  # Динамический ключ
             
             with col2:
                 dS_value = st.number_input(
@@ -1524,30 +1124,30 @@ def main():
                     value=st.session_state.model_params['dS']['value'],
                     step=1.0, 
                     format="%.2f",
-                    key=f"dS_input_{st.session_state.model_params['dS']['value']}"
+                    key=f"dS_input_{st.session_state.model_params['dS']['value']}"  # Динамический ключ
                 )
                 dS_fixed = st.checkbox("Fix", value=st.session_state.model_params['dS']['fixed'],
-                                      key=f"dS_fix_{st.session_state.model_params['dS']['fixed']}")
+                                      key=f"dS_fix_{st.session_state.model_params['dS']['fixed']}")  # Динамический ключ
                 
                 pH2O_value = st.number_input(
                     "pH₂O", 
                     value=st.session_state.model_params['pH2O']['value'],
                     step=0.001, 
                     format="%.4f",
-                    key=f"pH2O_input_{st.session_state.model_params['pH2O']['value']}"
+                    key=f"pH2O_input_{st.session_state.model_params['pH2O']['value']}"  # Динамический ключ
                 )
                 pH2O_fixed = st.checkbox("Fix", value=st.session_state.model_params['pH2O']['fixed'],
-                                        key=f"pH2O_fix_{st.session_state.model_params['pH2O']['fixed']}")
+                                        key=f"pH2O_fix_{st.session_state.model_params['pH2O']['fixed']}")  # Динамический ключ
                 
                 residue_value = st.number_input(
                     "Residue", 
                     value=st.session_state.model_params['residue']['value'],
                     step=0.0001, 
                     format="%.6f",
-                    key=f"residue_input_{st.session_state.model_params['residue']['value']}"
+                    key=f"residue_input_{st.session_state.model_params['residue']['value']}"  # Динамический ключ
                 )
                 residue_fixed = st.checkbox("Fix", value=st.session_state.model_params['residue']['fixed'],
-                                           key=f"residue_fix_{st.session_state.model_params['residue']['fixed']}")
+                                           key=f"residue_fix_{st.session_state.model_params['residue']['fixed']}")  # Динамический ключ
             
             # Кнопка фиттинга внутри формы
             fit_button = st.form_submit_button("🚀 Fit Model and Create Plots", type="primary", use_container_width=True)
@@ -1616,75 +1216,23 @@ def main():
                         
                         if st.session_state.fit_results is not None:
                             st.session_state.fitting_complete = True
-                            st.session_state.stage2_complete = False  # Сброс флага этапа 2
                             st.session_state.last_fit_params = {
                                 'fixed_params': fixed_params,
                                 'initial_guess': initial_guess
                             }
                             
-                            # Обновляем параметры в session state значениями из фиттинга
+                            # !!! НОВЫЙ КОД: Обновляем параметры в session state значениями из фиттинга
+                            # для параметров, которые не были зафиксированы
                             for param_name in ['Acc', 'alpha_1e6', 'beta', 'dH', 'dS', 'pH2O', 'residue']:
+                                # Если параметр не был зафиксирован (т.е. подгонялся), обновляем его значение
                                 if not st.session_state.model_params[param_name]['fixed']:
                                     fitted_value = st.session_state.fit_results['params'][param_name]
                                     st.session_state.model_params[param_name]['value'] = fitted_value
                             
                             st.success(f"Fitting completed in {end_time - start_time:.2f} seconds")
-                            st.rerun()
+                            st.rerun()  # Добавляем rerun для обновления отображаемых значений в форме
                         else:
                             st.error("Fitting failed. Please check your parameters.")
-        
-        st.divider()
-        
-        # НОВЫЙ РАЗДЕЛ: КРИСТАЛЛОХИМИЧЕСКИЕ ПАРАМЕТРЫ
-        st.header("Crystal Chemistry")
-        
-        with st.expander("Ionic Radii Configuration", expanded=False):
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                A_element = st.selectbox(
-                    "A-site element",
-                    ['Ba', 'Sr', 'Ca', 'La'],
-                    index=['Ba', 'Sr', 'Ca', 'La'].index(st.session_state.crystal_params['A_element']),
-                    help="A-site cation in ABO₃ perovskite (typically 2+ or 3+)"
-                )
-                st.session_state.crystal_params['A_element'] = A_element
-            
-            with col2:
-                B_element = st.selectbox(
-                    "B-site element (host)",
-                    ['Zr', 'Ce', 'Sn', 'Ti', 'Hf'],
-                    index=['Zr', 'Ce', 'Sn', 'Ti', 'Hf'].index(st.session_state.crystal_params['B_element']),
-                    help="B-site host cation (typically 4+)"
-                )
-                st.session_state.crystal_params['B_element'] = B_element
-            
-            with col3:
-                Acc_element = st.selectbox(
-                    "Acceptor (Acc)",
-                    ['Y', 'Sc', 'In', 'Yb', 'Gd', 'Dy', 'Ho', 'Sm', 'Al', 'Ga'],
-                    index=['Y', 'Sc', 'In', 'Yb', 'Gd', 'Dy', 'Ho', 'Sm', 'Al', 'Ga'].index(st.session_state.crystal_params['Acc_element']),
-                    help="Acceptor dopant on B-site (typically 3+)"
-                )
-                st.session_state.crystal_params['Acc_element'] = Acc_element
-            
-            # Опционально: фиксировать r_OH или подгонять
-            use_fixed_oh = st.checkbox(
-                "Fix OH⁻ radius", 
-                value=st.session_state.crystal_params['use_fixed_oh_radius'],
-                help="If checked, use fixed value for OH⁻ radius. If unchecked, r_V and r_OH are both estimated."
-            )
-            st.session_state.crystal_params['use_fixed_oh_radius'] = use_fixed_oh
-            
-            if use_fixed_oh:
-                r_OH_fixed = st.number_input(
-                    "OH⁻ radius (Å)", 
-                    value=st.session_state.crystal_params['r_OH_fixed'],
-                    step=0.01,
-                    format="%.3f",
-                    help="Fixed radius of OH⁻ group (typical value: 1.35-1.38 Å)"
-                )
-                st.session_state.crystal_params['r_OH_fixed'] = r_OH_fixed
         
         st.divider()
         
@@ -1811,26 +1359,6 @@ def main():
                 )
                 if new_cmap_style != st.session_state.plot_style['cmap_style']:
                     update_plot_style('cmap_style', new_cmap_style)
-        
-        # НОВАЯ КНОПКА: ЗАПУСК ВТОРОГО ЭТАПА (ОЦЕНКА РАДИУСОВ)
-        st.divider()
-        if st.session_state.fitting_complete and st.session_state.fit_results is not None:
-            if st.button("🔬 Stage 2: Estimate Ionic Radii", type="secondary", use_container_width=True):
-                with st.spinner("Estimating ionic radii from crystal chemistry model..."):
-                    try:
-                        st.session_state.fit_results = two_stage_fitting_with_radii(
-                            st.session_state.fit_results,
-                            st.session_state.crystal_params['A_element'],
-                            st.session_state.crystal_params['B_element'],
-                            st.session_state.crystal_params['Acc_element'],
-                            st.session_state.crystal_params['r_OH_fixed'],
-                            st.session_state.crystal_params['use_fixed_oh_radius']
-                        )
-                        st.session_state.stage2_complete = True
-                        st.success("Stage 2 completed! Ionic radii have been estimated.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Stage 2 error: {str(e)}")
     
     # ============================================
     # ОСНОВНОЙ КОНТЕНТ
@@ -1884,18 +1412,22 @@ def main():
                 st.markdown(f"**Units:** {info['units']}")
                 st.markdown("---")
         
-        # Display parameters
+        # Display parameters - используем актуальные значения из session state
         st.subheader("Model Parameters")
         
+        # Получаем актуальные значения параметров
         params_data = []
         for param_name in ['Acc', 'alpha_1e6', 'beta', 'dH', 'dS', 'pH2O', 'residue']:
+            # Для фиксированных параметров показываем значения из session_state
             if st.session_state.model_params[param_name]['fixed']:
                 value = st.session_state.model_params[param_name]['value']
                 status = "Fixed"
             else:
+                # Для подогнанных параметров показываем результаты фиттинга
                 value = st.session_state.fit_results['params'][param_name]
                 status = "Fitted"
             
+            # Форматируем название параметра для отображения
             display_name = param_name
             if param_name == 'alpha_1e6':
                 display_name = 'α·10⁶'
@@ -1915,55 +1447,15 @@ def main():
         params_df = pd.DataFrame(params_data)
         st.dataframe(params_df.style.format({"Value": "{:.6f}"}), use_container_width=True)
         
-        # Display radius estimation results if stage 2 is complete
-        if st.session_state.stage2_complete and 'radius_estimation' in st.session_state.fit_results:
-            st.subheader("🎯 Ionic Radius Estimation (Stage 2)")
-            
-            radius_data = st.session_state.fit_results['radius_estimation']
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Vacancy radius r_V", f"{radius_data['r_V']:.4f} Å", 
-                         help="Effective radius of oxygen vacancy")
-                st.metric("Oxygen radius r_O", f"{radius_data['r_O']:.4f} Å",
-                         help="Radius of O²⁻ ion (fixed)")
-            with col2:
-                st.metric("OH⁻ radius r_OH", f"{radius_data['r_OH']:.4f} Å",
-                         help="Radius of OH⁻ group")
-                st.metric("B-site radius r_B", f"{radius_data['r_B']:.4f} Å",
-                         help="Effective radius of B-site cation")
-            with col3:
-                st.metric("A-site radius r_A", f"{radius_data['r_A']:.4f} Å",
-                         help="Effective radius of A-site cation")
-                st.metric("Lattice parameter a", f"{radius_data['a_calculated']:.4f} Å",
-                         help="Calculated lattice parameter at mid temperature")
-            
-            st.markdown("**β Coefficient Decomposition:**")
-            beta_col1, beta_col2, beta_col3, beta_col4 = st.columns(4)
-            with beta_col1:
-                st.metric("β_cation", f"{radius_data['beta_cation']:.4f}")
-            with beta_col2:
-                st.metric("β_anion", f"{radius_data['beta_anion']:.4f}")
-            with beta_col3:
-                st.metric("β_total (calc)", f"{radius_data['beta_total_calc']:.4f}")
-            with beta_col4:
-                st.metric("β_total (exp)", f"{radius_data['beta_exp']:.4f}")
-            
-            if abs(radius_data['beta_difference']) > 0.001:
-                st.warning(f"⚠️ Difference between calculated and experimental β: {radius_data['beta_difference']:.4f}")
-            else:
-                st.success(f"✅ Good agreement! Difference: {radius_data['beta_difference']:.4f}")
-        
         st.divider()
         st.header("Plots")
         
         # Создаём вкладки для лучшей организации множества графиков
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4 = st.tabs([
             "📈 Basic Plots", 
             "🔍 Advanced Analysis", 
             "📊 Statistical Analysis", 
-            "🧪 Model Insights",
-            "🔬 Radius Analysis"
+            "🧪 Model Insights"
         ])
         
         with tab1:
@@ -2086,56 +1578,16 @@ def main():
             - Inflection points indicate changes in reaction kinetics
             """)
         
-        with tab5:
-            st.subheader("Ionic Radius Analysis (Stage 2)")
-            
-            if st.session_state.stage2_complete and 'radius_estimation' in st.session_state.fit_results:
-                # Create radius analysis plot
-                plot_radius = create_radius_analysis_plot(
-                    st.session_state.fit_results['radius_estimation'],
-                    st.session_state.plot_style
-                )
-                st.pyplot(plot_radius)
-                
-                st.info("""
-                **Radius Analysis Interpretation:**
-                
-                **β Coefficient Decomposition:**
-                - **β_cation**: Contribution from B-site cation radius change due to hydration
-                - **β_anion**: Contribution from anion sublattice (oxygen vacancies + OH groups)
-                - **β_total**: Sum of both contributions (should match experimental β)
-                
-                **Effective Radii:**
-                - **r_V**: Effective radius of oxygen vacancy (typically 0.5-0.8 Å, smaller than O²⁻)
-                - **r_OH**: Effective radius of OH⁻ group (typically 1.35-1.38 Å)
-                - **r_B, r_A**: Effective radii of cations at current CN
-                
-                **Lattice Parameter:**
-                - Calculated at mid-temperature using the estimated radii
-                - Should be consistent with literature values for similar compounds
-                """)
-            else:
-                st.warning("⚠️ Stage 2 not yet performed. Click 'Stage 2: Estimate Ionic Radii' in the sidebar to run the radius estimation.")
-                
-                st.markdown("""
-                **Stage 2 will provide:**
-                - Estimation of effective vacancy radius r_V
-                - Decomposition of β coefficient into cation and anion contributions
-                - Calculation of lattice parameter based on ionic radii
-                - Comparison with literature values
-                """)
-        
         # Download section
         st.divider()
         st.subheader("Export Results")
         
         # Download plots - организовано по вкладкам
-        download_tab1, download_tab2, download_tab3, download_tab4, download_tab5 = st.tabs([
+        download_tab1, download_tab2, download_tab3, download_tab4 = st.tabs([
             "📥 Basic Plots", 
             "📥 Advanced Plots", 
             "📥 Statistical Plots", 
-            "📥 Insight Plots",
-            "📥 Radius Plots"
+            "📥 Insight Plots"
         ])
         
         with download_tab1:
@@ -2286,21 +1738,6 @@ def main():
                         key="dl_btn_plot11"
                     )
         
-        with download_tab5:
-            if st.session_state.stage2_complete and 'radius_estimation' in st.session_state.fit_results:
-                if st.button("📥 Download Plot 13 (Radius Analysis)", key="dl_plot_radius"):
-                    buf = io.BytesIO()
-                    plot_radius.savefig(buf, format='png', dpi=600)
-                    st.download_button(
-                        label="Download PNG (600 DPI)",
-                        data=buf.getvalue(),
-                        file_name="plot13_radius_analysis.png",
-                        mime="image/png",
-                        key="dl_btn_plot_radius"
-                    )
-            else:
-                st.info("Run Stage 2 first to enable radius analysis plots.")
-        
         # Download data
         st.divider()
         st.subheader("Download Data")
@@ -2354,38 +1791,6 @@ Residue = {st.session_state.fit_results['params']['residue']:.6f}
 Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
 Fixed parameters: {', '.join([k for k, v in st.session_state.fit_results['fixed_params'].items() if v is not None])}
 """
-                if st.session_state.stage2_complete and 'radius_estimation' in st.session_state.fit_results:
-                    rad = st.session_state.fit_results['radius_estimation']
-                    params_text += f"""
-
-IONIC RADIUS ESTIMATION (Stage 2)
-================================
-Vacancy radius r_V = {rad['r_V']:.6f} Å
-Oxygen radius r_O = {rad['r_O']:.6f} Å
-OH⁻ radius r_OH = {rad['r_OH']:.6f} Å
-B-site radius r_B = {rad['r_B']:.6f} Å
-A-site radius r_A = {rad['r_A']:.6f} Å
-
-β Decomposition:
-- β_cation = {rad['beta_cation']:.6f}
-- β_anion = {rad['beta_anion']:.6f}
-- β_total (calc) = {rad['beta_total_calc']:.6f}
-- β_total (exp) = {rad['beta_exp']:.6f}
-- Difference = {rad['beta_difference']:.6e}
-
-Crystal Chemistry:
-- A-site: {rad['A_element']}
-- B-site: {rad['B_element']}
-- Acceptor: {rad['Acc_element']}
-- x (fitted) = {rad['x_fitted']:.6f}
-- y at T_mid = {rad['y_at_midT']:.6f}
-- T_mid = {rad['T_mid']:.2f} °C
-
-Lattice Parameter (at mid T):
-- a = {rad['a_calculated']:.6f} Å
-- L_anion = {rad['L_anion']:.6f} Å
-"""
-                
                 st.download_button(
                     label="Download Parameters",
                     data=params_text,
@@ -2405,7 +1810,7 @@ Lattice Parameter (at mid T):
         """
         <div style='text-align: center'>
             <p>Thermo-Mechanical Expansion Modeling Tool | For scientific publications | 600 DPI export</p>
-            <p>Includes 13 comprehensive plots for detailed analysis (Stage 2: Ionic Radius Estimation)</p>
+            <p>Includes 12 comprehensive plots for detailed analysis</p>
         </div>
         """,
         unsafe_allow_html=True
