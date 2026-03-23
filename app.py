@@ -57,7 +57,9 @@ def initialize_session_state():
     defaults = {
         'experimental_data': None,
         'fit_results': None,
+        'geometric_fit_results': None,
         'last_fit_params': None,
+        'geometric_fit_complete': False,
         'plot_style': {
             'point_color': '#1f77b4',
             'point_alpha': 0.8,
@@ -82,6 +84,12 @@ def initialize_session_state():
             'pH2O': {'value': 0.083, 'fixed': False},
             'residue': {'value': 0.0, 'fixed': False}
         },
+        'cation_selection': {
+            'A_cation': 'Ba',
+            'B_cation': 'Zr',
+            'Acc_cation': 'Y'
+        },
+        'ionic_radii_db': None,
         'data_loaded': False,
         'plots_generated': False,
         'fitting_complete': False
@@ -93,6 +101,147 @@ def initialize_session_state():
 
 # Initialize session state
 initialize_session_state()
+
+# ============================================
+# МОДУЛЬ ИОННЫХ РАДИУСОВ (ТАБЛИЦА ШЕННОНА)
+# ============================================
+
+def parse_shannon_table() -> Dict[str, Dict[int, float]]:
+    """Parse Shannon ionic radii table and return database"""
+    # Создаем базу данных радиусов для различных ионов и координационных чисел
+    # Данные из предоставленной таблицы (ионные радиусы, Å)
+    radii_db = {
+        'Ba': {2: {6: 1.35, 7: 1.38, 8: 1.42, 9: 1.47, 10: 1.52, 11: 1.57, 12: 1.61}},
+        'Sr': {2: {6: 1.18, 7: 1.21, 8: 1.26, 9: 1.31, 10: 1.36, 12: 1.44}},
+        'Ca': {2: {6: 1.00, 7: 1.06, 8: 1.12, 9: 1.18, 10: 1.23, 12: 1.34}},
+        'La': {3: {6: 1.032, 7: 1.10, 8: 1.16, 9: 1.216, 10: 1.27, 12: 1.36}},
+        'Zr': {4: {4: 0.59, 5: 0.66, 6: 0.72, 7: 0.78, 8: 0.84, 9: 0.89}},
+        'Ce': {4: {6: 0.87, 8: 0.97, 10: 1.07, 12: 1.14}},
+        'Ti': {4: {4: 0.42, 5: 0.51, 6: 0.605, 8: 0.74}},
+        'Hf': {4: {4: 0.58, 6: 0.71, 7: 0.76, 8: 0.83}},
+        'Sn': {4: {4: 0.55, 5: 0.62, 6: 0.69, 7: 0.75, 8: 0.81}},
+        'In': {3: {4: 0.62, 6: 0.80, 8: 0.92}},
+        'Sc': {3: {6: 0.745, 8: 0.87}},
+        'Y': {3: {6: 0.90, 7: 0.96, 8: 1.019, 9: 1.075}},
+        'Yb': {3: {6: 0.868, 7: 0.925, 8: 0.985, 9: 1.042}},
+        'Mg': {2: {4: 0.57, 5: 0.66, 6: 0.72, 8: 0.89}},
+        'Zn': {2: {4: 0.60, 5: 0.68, 6: 0.74, 8: 0.90}},
+        'Al': {3: {4: 0.39, 5: 0.48, 6: 0.535}},
+        'Ga': {3: {4: 0.47, 5: 0.55, 6: 0.62}},
+        'Ho': {3: {6: 0.901, 8: 1.015, 9: 1.072, 10: 1.12}},
+        'Dy': {3: {6: 0.912, 7: 0.97, 8: 1.027, 9: 1.083}},
+        'Gd': {3: {6: 0.938, 7: 1.00, 8: 1.053, 9: 1.107}},
+        'Sm': {3: {6: 0.958, 7: 1.02, 8: 1.079, 9: 1.132, 12: 1.24}},
+        'Nd': {3: {6: 0.983, 8: 1.109, 9: 1.163, 12: 1.27}},
+        'Pr': {3: {6: 0.99, 8: 1.126, 9: 1.179}},
+        'Er': {3: {6: 0.89, 8: 1.004, 9: 1.062}},
+        'Tm': {3: {6: 0.88, 8: 0.994, 9: 1.052}},
+        'Lu': {3: {6: 0.861, 8: 0.977, 9: 1.032}},
+    }
+    return radii_db
+
+def get_ionic_radius(ion: str, charge: int, cn: float, radii_db: Dict) -> float:
+    """Get ionic radius for given ion, charge, and coordination number with linear interpolation/extrapolation"""
+    if ion not in radii_db:
+        raise ValueError(f"Ion {ion} not found in database")
+    
+    if charge not in radii_db[ion]:
+        raise ValueError(f"Charge {charge} for ion {ion} not found in database")
+    
+    cn_data = radii_db[ion][charge]
+    cn_values = sorted(cn_data.keys())
+    
+    if cn in cn_values:
+        return cn_data[cn]
+    
+    # Linear interpolation between known CN values
+    if cn < min(cn_values):
+        # Extrapolation to lower CN
+        cn1 = min(cn_values)
+        cn2 = sorted(cn_values)[1] if len(cn_values) > 1 else cn1
+        r1 = cn_data[cn1]
+        r2 = cn_data[cn2]
+        slope = (r2 - r1) / (cn2 - cn1)
+        return r1 + slope * (cn - cn1)
+    elif cn > max(cn_values):
+        # Extrapolation to higher CN
+        cn1 = max(cn_values)
+        cn2 = sorted(cn_values)[-2] if len(cn_values) > 1 else cn1
+        r1 = cn_data[cn1]
+        r2 = cn_data[cn2]
+        slope = (r1 - r2) / (cn1 - cn2)
+        return r1 + slope * (cn - cn1)
+    else:
+        # Interpolation between known CN values
+        lower_cn = max([c for c in cn_values if c < cn])
+        upper_cn = min([c for c in cn_values if c > cn])
+        r_lower = cn_data[lower_cn]
+        r_upper = cn_data[upper_cn]
+        return r_lower + (r_upper - r_lower) * (cn - lower_cn) / (upper_cn - lower_cn)
+
+# ============================================
+# ГЕОМЕТРИЧЕСКАЯ МОДЕЛЬ ПЕРОВСКИТА
+# ============================================
+
+def calculate_coordination_numbers(x: float, y: float) -> Tuple[float, float]:
+    """Calculate coordination numbers for A and B cations according to the model"""
+    CN_B = 6 - x + y
+    CN_A = 12 - 2 * x + 2 * y
+    return CN_A, CN_B
+
+def calculate_average_radii(x: float, y: float, A_cation: str, B_cation: str, 
+                           Acc_cation: str, radii_db: Dict, 
+                           r_V: float, r_OH: float) -> Tuple[float, float, float]:
+    """Calculate average radii for A, B, and anion sublattices"""
+    
+    CN_A, CN_B = calculate_coordination_numbers(x, y)
+    
+    # A-cation radius (undoped)
+    r_A = get_ionic_radius(A_cation, 2 if A_cation in ['Ba', 'Sr', 'Ca'] else 3, CN_A, radii_db)
+    
+    # B-cation radius (mixed with acceptor)
+    r_B_host = get_ionic_radius(B_cation, 4, CN_B, radii_db)
+    r_Acc = get_ionic_radius(Acc_cation, 3, CN_B, radii_db)
+    r_B_avg = (1 - x) * r_B_host + x * r_Acc
+    
+    # Anion sublattice
+    r_O = 1.38  # O2- radius for CN=4 (ionic radius)
+    
+    # Concentrations
+    V_O_conc = (x - y) / 2
+    O_O_conc = 3 - (x + y) / 2
+    
+    # Average anion radius
+    r_anion_avg = (O_O_conc * r_O + V_O_conc * r_V + y * r_OH) / 3
+    
+    return r_A, r_B_avg, r_anion_avg
+
+def calculate_lattice_parameter(x: float, y: float, A_cation: str, B_cation: str,
+                                Acc_cation: str, radii_db: Dict,
+                                r_V: float, r_OH: float) -> float:
+    """Calculate lattice parameter for cubic perovskite"""
+    r_A, r_B, r_O_avg = calculate_average_radii(x, y, A_cation, B_cation, 
+                                                Acc_cation, radii_db, r_V, r_OH)
+    # For cubic perovskite: a = √2 * (r_A + r_B + r_O)
+    a = np.sqrt(2) * (r_A + r_B + r_O_avg)
+    return a
+
+def calculate_geometric_expansion(T_data: np.ndarray, y_data: np.ndarray, 
+                                  x: float, A_cation: str, B_cation: str,
+                                  Acc_cation: str, radii_db: Dict,
+                                  r_V: float, r_OH: float,
+                                  alpha: float, gamma: float,
+                                  T_ref: float, a_ref: float) -> np.ndarray:
+    """Calculate ΔL/L0 based on geometric model"""
+    expansion = np.zeros_like(T_data)
+    
+    for i in range(len(T_data)):
+        y = y_data[i]
+        a = calculate_lattice_parameter(x, y, A_cation, B_cation, Acc_cation, 
+                                       radii_db, r_V, r_OH)
+        expansion[i] = (a - a_ref) / a_ref + alpha * (T_data[i] - T_ref) + gamma
+    
+    return expansion
 
 # ============================================
 # ОПТИМИЗИРОВАННЫЕ ФУНКЦИИ С КЭШИРОВАНИЕМ
@@ -161,7 +310,6 @@ def model_func_cached(T: np.ndarray, Acc: float, alpha_1e6: float, beta: float,
     dl_dl0 = (alpha_1e6/1e6) * (T - T_start) + beta * (oh - oh_start) + residue
     return dl_dl0
 
-@st.cache_data(ttl=3600, show_spinner=False)
 @st.cache_data(ttl=3600, show_spinner=False)
 def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any], 
                     initial_guess: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -238,31 +386,20 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
         rmse = np.sqrt(mse)
         r2 = 1 - np.sum(residuals**2) / np.sum((dl_data - np.mean(dl_data))**2)
         
-        # ИСПРАВЛЕННОЕ ВЫЧИСЛЕНИЕ χ²:
-        # Для моделей регрессии без известных погрешностей измерений используется:
-        # χ²_red = Σ(y_i - ŷ_i)² / (N - p)
-        # где N - количество точек данных, p - количество свободных параметров
         N = len(dl_data)
-        p = len(vary_params)  # количество подгоняемых параметров
+        p = len(vary_params)
         
         if N > p:
-            chi2 = np.sum(residuals**2) / (N - p)  # приведенный χ²
+            chi2 = np.sum(residuals**2) / (N - p)
         else:
-            chi2 = np.nan  # недостаточно данных
+            chi2 = np.nan
         
-        # Альтернативно, если хотите классический χ²:
-        # Предполагаем одинаковые погрешности σ = rmse
-        # chi2 = np.sum(residuals**2) / (rmse**2) if rmse > 0 else np.nan
-        
-        # Calculate TEC for both experimental and model data
         tec_exp = calculate_tec_cached(T_data, dl_data)
         tec_model = calculate_tec_cached(T_data, dl_model)
         
-        # Calculate proton concentration
         oh, _ = calculate_oh_cached(T_data, result_params['Acc'], result_params['dH'], 
                                   result_params['dS'], result_params['pH2O'])
         
-        # Calculate individual contributions
         thermal_contrib = (result_params['alpha_1e6']/1e6) * (T_data - T_start)
         chem_contrib = result_params['beta'] * (oh - oh_start)
         
@@ -276,7 +413,7 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
             'rmse': rmse,
             'r2': r2,
             'chi2': chi2,
-            'reduced_chi2': chi2,  # добавим для ясности
+            'reduced_chi2': chi2,
             'N_points': N,
             'n_free_params': p,
             'T_start': T_start,
@@ -297,6 +434,162 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
         st.error(f"Fitting error: {str(e)}")
         return None
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fit_geometric_model_cached(data: np.ndarray, oh_concentration: np.ndarray,
+                               x: float, A_cation: str, B_cation: str,
+                               Acc_cation: str, radii_db: Dict,
+                               alpha: float, gamma: float, T_ref: float,
+                               initial_r_V: float, initial_r_OH: float,
+                               fit_r_V: bool, fit_r_OH: bool,
+                               fit_alpha: bool, fit_gamma: bool) -> Optional[Dict[str, Any]]:
+    """Fit geometric model to estimate r_V and r_OH"""
+    
+    T_data = data[:, 0]
+    dl_data = data[:, 1]
+    y_data = oh_concentration
+    
+    # Calculate reference lattice parameter at T_ref with y=0
+    a_ref = calculate_lattice_parameter(x, 0.0, A_cation, B_cation, Acc_cation,
+                                        radii_db, initial_r_V, initial_r_OH)
+    
+    # Prepare fitting parameters
+    vary_params = []
+    bounds_lower = []
+    bounds_upper = []
+    initial_params = []
+    param_names = []
+    
+    if fit_r_V:
+        param_names.append('r_V')
+        vary_params.append('r_V')
+        bounds_lower.append(0.5)
+        bounds_upper.append(1.5)
+        initial_params.append(initial_r_V)
+    
+    if fit_r_OH:
+        param_names.append('r_OH')
+        vary_params.append('r_OH')
+        bounds_lower.append(0.5)
+        bounds_upper.append(1.5)
+        initial_params.append(initial_r_OH)
+    
+    if fit_alpha:
+        param_names.append('alpha')
+        vary_params.append('alpha')
+        bounds_lower.append(0.0)
+        bounds_upper.append(1e-4)
+        initial_params.append(alpha)
+    
+    if fit_gamma:
+        param_names.append('gamma')
+        vary_params.append('gamma')
+        bounds_lower.append(-0.01)
+        bounds_upper.append(0.01)
+        initial_params.append(gamma)
+    
+    def geometric_model(T, y, *params):
+        r_V_val = params[param_names.index('r_V')] if fit_r_V else initial_r_V
+        r_OH_val = params[param_names.index('r_OH')] if fit_r_OH else initial_r_OH
+        alpha_val = params[param_names.index('alpha')] if fit_alpha else alpha
+        gamma_val = params[param_names.index('gamma')] if fit_gamma else gamma
+        
+        expansion = np.zeros_like(T)
+        for i in range(len(T)):
+            a = calculate_lattice_parameter(x, y[i], A_cation, B_cation, Acc_cation,
+                                           radii_db, r_V_val, r_OH_val)
+            expansion[i] = (a - a_ref) / a_ref + alpha_val * (T[i] - T_ref) + gamma_val
+        return expansion
+    
+    def fit_func_wrapper(T, *params):
+        return geometric_model(T, y_data, *params)
+    
+    try:
+        if len(vary_params) > 0:
+            popt, pcov = curve_fit(fit_func_wrapper, T_data, dl_data,
+                                  p0=initial_params,
+                                  bounds=(bounds_lower, bounds_upper),
+                                  maxfev=5000)
+            
+            result_params = {
+                'r_V': popt[param_names.index('r_V')] if fit_r_V else initial_r_V,
+                'r_OH': popt[param_names.index('r_OH')] if fit_r_OH else initial_r_OH,
+                'alpha': popt[param_names.index('alpha')] if fit_alpha else alpha,
+                'gamma': popt[param_names.index('gamma')] if fit_gamma else gamma
+            }
+        else:
+            popt = []
+            pcov = None
+            result_params = {
+                'r_V': initial_r_V,
+                'r_OH': initial_r_OH,
+                'alpha': alpha,
+                'gamma': gamma
+            }
+        
+        # Calculate model expansion
+        dl_model = geometric_model(T_data, y_data,
+                                  *([result_params[p] for p in param_names] if param_names else []))
+        
+        residuals = dl_data - dl_model
+        mse = np.mean(residuals**2)
+        rmse = np.sqrt(mse)
+        r2 = 1 - np.sum(residuals**2) / np.sum((dl_data - np.mean(dl_data))**2)
+        
+        N = len(dl_data)
+        p = len(vary_params)
+        if N > p:
+            chi2 = np.sum(residuals**2) / (N - p)
+        else:
+            chi2 = np.nan
+        
+        # Calculate individual sublattice contributions
+        a_ref_val = a_ref
+        sublattice_contributions = []
+        for i in range(len(T_data)):
+            r_A, r_B, r_O = calculate_average_radii(x, y_data[i], A_cation, B_cation,
+                                                    Acc_cation, radii_db,
+                                                    result_params['r_V'], result_params['r_OH'])
+            a_total = np.sqrt(2) * (r_A + r_B + r_O)
+            
+            # Calculate contributions from each sublattice
+            a_A_only = np.sqrt(2) * (r_A + 0 + 0)
+            a_B_only = np.sqrt(2) * (0 + r_B + 0)
+            a_O_only = np.sqrt(2) * (0 + 0 + r_O)
+            
+            sublattice_contributions.append({
+                'T': T_data[i],
+                'y': y_data[i],
+                'a_total': a_total,
+                'a_A': a_A_only,
+                'a_B': a_B_only,
+                'a_O': a_O_only
+            })
+        
+        return {
+            'params': result_params,
+            'popt': popt,
+            'pcov': pcov,
+            'dl_model': dl_model,
+            'residuals': residuals,
+            'mse': mse,
+            'rmse': rmse,
+            'r2': r2,
+            'chi2': chi2,
+            'N_points': N,
+            'n_free_params': p,
+            'vary_params': vary_params,
+            'param_names': param_names,
+            'T_data': T_data,
+            'dl_data': dl_data,
+            'y_data': y_data,
+            'a_ref': a_ref_val,
+            'sublattice_contributions': sublattice_contributions
+        }
+    
+    except Exception as e:
+        st.error(f"Geometric fitting error: {str(e)}")
+        return None
+
 # ============================================
 # ФУНКЦИИ ДЛЯ СОЗДАНИЯ ГРАФИКОВ (С КЭШИРОВАНИЕМ)
 # ============================================
@@ -314,12 +607,10 @@ def create_plot1_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     dl_model = fit_results['dl_model']
     residuals = fit_results['residuals']
     
-    # ИЗМЕНЕНИЕ: сначала рисуем экспериментальные точки
     ax1.scatter(T, dl_exp, s=style['point_size'], color=style['point_color'], 
                edgecolor='none', 
                label='Experimental', zorder=3, alpha=style['point_alpha'])
     
-    # ИЗМЕНЕНИЕ: потом рисуем модельную линию с более высоким zorder
     ax1.plot(T, dl_model, '-', color=style['model_line_color'], 
             linewidth=style['line_width'], label='Model', zorder=4)
     
@@ -374,24 +665,16 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     chem_contrib = fit_results['chem_contrib']
     residue = fit_results['params']['residue']
     
-    # Определяем направление изменения температуры (нагрев или охлаждение)
     T_diff = T[-1] - T[0]
     
-    if T_diff > 0:  # Нагрев (температура растёт)
-        # Тепловое изменение: расширение при нагреве (положительное)
+    if T_diff > 0:
         thermal_start = thermal_contrib[0] + residue
         thermal_changes = (thermal_contrib + residue) - thermal_start
-        
-        # Химическое изменение: сжатие при дегидратации (отрицательное)
         chem_end = chem_contrib[-1] + residue
         chem_changes = chem_end - (chem_contrib + residue)
-        
-    else:  # Охлаждение (температура падает)
-        # Тепловое изменение: сжатие при охлаждении (отрицательное)
+    else:
         thermal_end = thermal_contrib[-1] + residue
         thermal_changes = (thermal_contrib + residue) - thermal_end
-        
-        # Химическое изменение: расширение при гидратации (положительное)
         chem_start = chem_contrib[0] + residue
         chem_changes = (chem_contrib + residue) - chem_start
     
@@ -406,7 +689,6 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3, linestyle='--', axis='y')
     
-    # Добавляем аннотацию о направлении
     direction = "Heating" if T_diff > 0 else "Cooling"
     ax.text(0.98, 0.98, direction, transform=ax.transAxes,
            ha='right', va='top', fontweight='bold',
@@ -425,7 +707,6 @@ def create_plot4_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     
     T = fit_results['T_data']
     
-    # TEC plot
     ax1.plot(T, fit_results['tec_exp']*1e6, 'o-', color=style['tec_exp_color'], 
             linewidth=style['line_width']-0.5, markersize=4, alpha=0.7)
     ax1.plot(T, fit_results['tec_model']*1e6, '-', color=style['tec_model_color'], 
@@ -442,7 +723,6 @@ def create_plot4_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
                        fontsize=11, color=style['oh_color'])
     ax1_right.tick_params(axis='y', labelcolor=style['oh_color'])
     
-    # Combine legends in one box on the right
     from matplotlib.lines import Line2D
     legend_elements = [
         Line2D([0], [0], marker='o', color=style['tec_exp_color'], 
@@ -453,11 +733,9 @@ def create_plot4_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
                label='[OH] concentration', linewidth=style['line_width'])
     ]
     
-    # Position legend on the right side, centered vertically
     ax1.legend(handles=legend_elements, loc='center left', 
               bbox_to_anchor=(0.45, 0.5), frameon=True, framealpha=0.9)
     
-    # TEC residual plot
     tec_residuals = fit_results['tec_exp'] - fit_results['tec_model']
     ax2.fill_between(T, 0, tec_residuals*1e6, alpha=0.3, color='purple')
     ax2.plot(T, tec_residuals*1e6, 'k-', linewidth=1)
@@ -478,18 +756,15 @@ def create_plot5_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     dl_model = fit_results['dl_model']
     T = fit_results['T_data']
     
-    # Get colormap
     cmap = getattr(cm, style['cmap_style'])
     norm = Normalize(vmin=T.min(), vmax=T.max())
     
     sc = ax.scatter(dl_model, dl_exp, c=T, cmap=cmap, norm=norm,
                    s=style['point_size']*0.7, edgecolor='none')
     
-    # Add colorbar
     cbar = fig.colorbar(sc, ax=ax)
     cbar.set_label('Temperature (°C)', fontweight='bold', fontsize=10)
     
-    # Add diagonal line for perfect fit
     min_val = min(dl_exp.min(), dl_model.min())
     max_val = max(dl_exp.max(), dl_model.max())
     ax.plot([min_val, max_val], [min_val, max_val], 'r--', 
@@ -513,18 +788,15 @@ def create_plot6_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     tec_model = fit_results['tec_model'] * 1e6
     T = fit_results['T_data']
     
-    # Get colormap
     cmap = getattr(cm, style['cmap_style'])
     norm = Normalize(vmin=T.min(), vmax=T.max())
     
     sc = ax.scatter(tec_model, tec_exp, c=T, cmap=cmap, norm=norm,
                    s=style['point_size']*0.7, edgecolor='none')
     
-    # Add colorbar
     cbar = fig.colorbar(sc, ax=ax)
     cbar.set_label('Temperature (°C)', fontweight='bold', fontsize=10)
     
-    # Add diagonal line for perfect fit
     min_val = min(tec_exp.min(), tec_model.min())
     max_val = max(tec_exp.max(), tec_model.max())
     ax.plot([min_val, max_val], [min_val, max_val], 'r--', 
@@ -548,18 +820,15 @@ def create_plot7_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     chemical = fit_results['chem_contrib']
     residue = fit_results['params']['residue']
     
-    # Абсолютные значения с учётом residue
     thermal_abs = thermal + residue
-    chemical_abs = chemical - chemical[-1]  # химический вклад с нулём в конце
+    chemical_abs = chemical - chemical[-1]
     
-    # Процентные вклады (по абсолютным значениям)
     thermal_percent = np.abs(thermal_abs) / (np.abs(thermal_abs) + np.abs(chemical_abs)) * 100
     chemical_percent = np.abs(chemical_abs) / (np.abs(thermal_abs) + np.abs(chemical_abs)) * 100
     
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5, 6), sharex=True)
     fig.subplots_adjust(hspace=0.1)
     
-    # Абсолютные значения
     ax1.plot(T, thermal_abs, '-', color=style['thermal_line_color'], 
             linewidth=style['line_width'], label='Thermal contribution')
     ax1.plot(T, chemical_abs, '-', color=style['chemical_line_color'], 
@@ -568,7 +837,6 @@ def create_plot7_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     ax1.legend(loc='best')
     ax1.grid(True, alpha=0.3, linestyle='--')
     
-    # Процентные доли
     ax2.stackplot(T, [thermal_percent, chemical_percent], 
                   colors=[style['thermal_line_color'], style['chemical_line_color']],
                   labels=['Thermal %', 'Chemical %'], alpha=0.7)
@@ -578,7 +846,6 @@ def create_plot7_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     ax2.grid(True, alpha=0.3, linestyle='--')
     ax2.set_ylim(0, 100)
     
-    # Добавим аннотацию о максимальных вкладах
     max_thermal_temp = T[np.argmax(thermal_percent)]
     max_chemical_temp = T[np.argmax(chemical_percent)]
     
@@ -604,7 +871,6 @@ def create_plot8_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     fig, axes = plt.subplots(2, 2, figsize=(8, 6))
     axes = axes.flatten()
     
-    # Вариация α (±10%, ±5%, 0%, +5%, +10%)
     variations = [-0.10, -0.05, 0, 0.05, 0.10]
     for var in variations:
         alpha_var = params['alpha_1e6'] * (1 + var)
@@ -617,7 +883,6 @@ def create_plot8_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     axes[0].grid(True, alpha=0.3, linestyle='--')
     axes[0].legend(title='α variation', fontsize=8, title_fontsize=9)
     
-    # Вариация β (±10%, ±5%, 0%, +5%, +10%)
     for var in variations:
         beta_var = params['beta'] * (1 + var)
         dl_var = model_func_cached(T, params['Acc'], params['alpha_1e6'], beta_var,
@@ -629,7 +894,6 @@ def create_plot8_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     axes[1].grid(True, alpha=0.3, linestyle='--')
     axes[1].legend(title='β variation', fontsize=8, title_fontsize=9)
     
-    # Вариация ΔH (±5, ±2, 0, +2, +5 кДж/моль)
     dH_variations = [-5, -2, 0, 2, 5]
     for var in dH_variations:
         dH_var = params['dH'] + var
@@ -643,8 +907,7 @@ def create_plot8_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     axes[2].grid(True, alpha=0.3, linestyle='--')
     axes[2].legend(title='ΔH shift', fontsize=8, title_fontsize=9)
     
-    # Вариация pH₂O (логарифмическая шкала)
-    pH2O_variations = [-0.5, -0.2, 0, 0.2, 0.5]  # множители 10^var
+    pH2O_variations = [-0.5, -0.2, 0, 0.2, 0.5]
     for var in pH2O_variations:
         pH2O_var = params['pH2O'] * 10**var
         dl_var = model_func_cached(T, params['Acc'], params['alpha_1e6'], params['beta'],
@@ -668,17 +931,14 @@ def create_plot9_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     dl = fit_results['dl_data']
     dl_model = fit_results['dl_model']
     
-    # Первые производные (TEC)
     dldT_exp = np.gradient(dl, T)
     dldT_model = np.gradient(dl_model, T)
     
-    # Вторые производные (кривизна)
     d2ldT2_exp = np.gradient(dldT_exp, T)
     d2ldT2_model = np.gradient(dldT_model, T)
     
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
     
-    # Фазовый портрет 1: dl vs dldT
     sc1 = ax1.scatter(dl[1:-1], dldT_exp[1:-1]*1e6, c=T[1:-1], 
                      cmap=style['cmap_style'], s=50, edgecolor='none', alpha=0.8)
     ax1.plot(dl_model, dldT_model*1e6, 'k-', linewidth=2, alpha=0.7, label='Model trajectory')
@@ -690,7 +950,6 @@ def create_plot9_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     cbar1 = plt.colorbar(sc1, ax=ax1)
     cbar1.set_label('Temperature (°C)', fontweight='bold', fontsize=10)
     
-    # Фазовый портрет 2: dldT vs d2ldT2
     sc2 = ax2.scatter(dldT_exp[2:-2]*1e6, d2ldT2_exp[2:-2]*1e9, c=T[2:-2], 
                      cmap=style['cmap_style'], s=50, edgecolor='none', alpha=0.8)
     ax2.plot(dldT_model*1e6, d2ldT2_model*1e9, 'k-', linewidth=2, alpha=0.7, label='Model trajectory')
@@ -717,7 +976,6 @@ def create_plot10_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
     
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 8))
     
-    # Гистограмма остатков
     n_bins = min(15, len(residuals)//5)
     if n_bins < 5:
         n_bins = 5
@@ -735,7 +993,6 @@ def create_plot10_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
     ax1.legend(loc='best')
     ax1.grid(True, alpha=0.3, linestyle='--')
     
-    # QQ-plot
     probplot(residuals, dist="norm", plot=ax2)
     ax2.get_lines()[0].set_marker('o')
     ax2.get_lines()[0].set_markersize(4)
@@ -749,9 +1006,9 @@ def create_plot10_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
     ax2.set_xlabel('Theoretical Quantiles', fontweight='bold', fontsize=11)
     ax2.set_ylabel('Sample Quantiles', fontweight='bold', fontsize=11)
     
-    # Автокорреляция остатков
     max_lags = min(20, len(residuals)//2)
     if max_lags >= 5:
+        from statsmodels.graphics.tsaplots import plot_acf
         plot_acf(residuals, lags=max_lags, ax=ax3, 
                 alpha=0.05, title='Autocorrelation of Residuals',
                 marker='o', markersize=4,
@@ -766,7 +1023,6 @@ def create_plot10_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
     ax3.set_ylabel('Autocorrelation', fontweight='bold', fontsize=11)
     ax3.grid(True, alpha=0.3, linestyle='--')
     
-    # Остатки vs предсказанные значения
     ax4.scatter(dl_model, residuals, s=30, alpha=0.7, 
                color=style['point_color'], edgecolor='none')
     ax4.axhline(y=0, color='red', linestyle='--', alpha=0.7, linewidth=1.5)
@@ -775,7 +1031,6 @@ def create_plot10_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
     ax4.set_title('Residuals vs Fitted Values', fontweight='bold', fontsize=12)
     ax4.grid(True, alpha=0.3, linestyle='--')
     
-    # Добавить линии ±2σ и ±3σ
     ax4.axhline(y=2*std, color='gray', linestyle=':', alpha=0.5, linewidth=1)
     ax4.axhline(y=-2*std, color='gray', linestyle=':', alpha=0.5, linewidth=1)
     ax4.axhline(y=3*std, color='gray', linestyle=':', alpha=0.3, linewidth=0.8)
@@ -795,20 +1050,16 @@ def create_plot11_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
     T = fit_results['T_data']
     oh = fit_results['oh_concentration']
     
-    # Производные [OH] по температуре
-    dohdT = np.gradient(oh, T) * 1e3  # в 10⁻³ K⁻¹
+    dohdT = np.gradient(oh, T) * 1e3
     d2ohdT2 = np.gradient(dohdT, T)
     
-    # d(ln[OH])/dT = (1/[OH]) * d[OH]/dT
-    # Избегаем деления на ноль или очень маленькие значения
     oh_safe = oh.copy()
     oh_safe[oh_safe < 1e-10] = 1e-10
-    dlnohdT = dohdT / oh_safe * 1e-3  # масштабируем обратно
+    dlnohdT = dohdT / oh_safe * 1e-3
     
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8), sharex=True)
     fig.subplots_adjust(hspace=0.1)
     
-    # Концентрация и первая производная
     ax1.plot(T, oh, '-', color=style['oh_color'], linewidth=2, label='[OH] concentration')
     ax1.set_ylabel('[OH] (arb. units)', color=style['oh_color'], fontweight='bold', fontsize=11)
     ax1.tick_params(axis='y', labelcolor=style['oh_color'])
@@ -825,7 +1076,6 @@ def create_plot11_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
     
     ax1.set_title('OH Concentration Dynamics', fontweight='bold', fontsize=12)
     
-    # Вторая производная и коэффициент экспоненты
     ax2.plot(T, d2ohdT2, '-', color='orange', linewidth=2, 
             label='d²[OH]/dT²', alpha=0.8)
     ax2.set_xlabel('Temperature (°C)', fontweight='bold', fontsize=11)
@@ -841,8 +1091,6 @@ def create_plot11_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
     ax2_r.tick_params(axis='y', labelcolor='green')
     ax2_r.legend(loc='upper right')
     
-    # Добавим аннотации для ключевых точек
-    # Точка максимальной скорости изменения
     max_dohdT_idx = np.argmax(np.abs(dohdT))
     ax1.annotate(f'Max rate\n{T[max_dohdT_idx]:.1f}°C',
                 xy=(T[max_dohdT_idx], oh[max_dohdT_idx]),
@@ -850,7 +1098,6 @@ def create_plot11_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
                 arrowprops=dict(arrowstyle='->', color='gray', alpha=0.7),
                 fontsize=9, ha='center')
     
-    # Точка перегиба (где d2ohdT2 меняет знак)
     sign_changes = np.where(np.diff(np.sign(d2ohdT2)))[0]
     if len(sign_changes) > 0:
         inflection_idx = sign_changes[0]
@@ -872,7 +1119,6 @@ def create_plot12_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
     vary_params = fit_results.get('vary_params', [])
     
     if pcov is None or np.all(pcov == 0) or len(vary_params) < 2:
-        # Если нет ковариационной матрицы или недостаточно параметров
         fig, ax = plt.subplots(figsize=(6, 5))
         ax.text(0.5, 0.5, 'Covariance matrix not available\nfor correlation analysis\n(too few fitted parameters or matrix is zero)',
                 ha='center', va='center', transform=ax.transAxes,
@@ -883,8 +1129,6 @@ def create_plot12_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
         return fig
     
     try:
-        # Извлекаем корреляции из ковариационной матрицы
-        # Используем только подогнанные параметры
         param_names_display = []
         param_indices = []
         
@@ -904,23 +1148,18 @@ def create_plot12_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
                 param_names_display.append(display_names.get(name, name))
                 param_indices.append(i)
         
-        # Выбираем только подматрицу для подогнанных параметров
         pcov_subset = pcov[np.ix_(param_indices, param_indices)]
         
-        # Вычисляем корреляционную матрицу
         std_dev = np.sqrt(np.diag(pcov_subset))
-        # Избегаем деления на ноль
         std_dev[std_dev == 0] = 1e-10
         corr_matrix = pcov_subset / np.outer(std_dev, std_dev)
         
-        # Ограничиваем значения для стабильности
         corr_matrix = np.clip(corr_matrix, -1, 1)
         
         fig, ax = plt.subplots(figsize=(6, 5))
         
         im = ax.imshow(corr_matrix, cmap='coolwarm', vmin=-1, vmax=1, aspect='auto')
         
-        # Добавляем аннотации
         for i in range(len(param_names_display)):
             for j in range(len(param_names_display)):
                 text_color = 'white' if abs(corr_matrix[i, j]) > 0.7 else 'black'
@@ -934,7 +1173,6 @@ def create_plot12_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
         ax.set_yticklabels(param_names_display, fontsize=10)
         ax.set_title('Parameter Correlation Matrix', fontweight='bold', fontsize=14)
         
-        # Добавим информацию о количестве подогнанных параметров
         ax.text(0.02, 1.02, f'Fitted parameters: {len(vary_params)}', 
                 transform=ax.transAxes, ha='left', va='bottom', fontsize=9,
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
@@ -947,7 +1185,6 @@ def create_plot12_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
         return fig
         
     except Exception as e:
-        # Если что-то пошло не так, создаём простой график с сообщением
         fig, ax = plt.subplots(figsize=(6, 5))
         ax.text(0.5, 0.5, f'Error creating correlation matrix:\n{str(e)[:100]}...',
                 ha='center', va='center', transform=ax.transAxes,
@@ -956,6 +1193,215 @@ def create_plot12_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> 
         ax.axis('off')
         fig.set_dpi(600)
         return fig
+
+# ============================================
+# НОВЫЕ ГРАФИКИ ДЛЯ ГЕОМЕТРИЧЕСКОЙ МОДЕЛИ
+# ============================================
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot13_cached(geometric_fit: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Plot 13: Effective ionic radii vs Coordination Number"""
+    fig, ax = plt.subplots(figsize=(6, 5))
+    
+    T = geometric_fit['T_data']
+    y = geometric_fit['y_data']
+    x = st.session_state.model_params['Acc']['value'] if st.session_state.fit_results else 0.6
+    
+    CN_A, CN_B = calculate_coordination_numbers(x, y)
+    
+    ax.plot(CN_A, label='CN_A', marker='o', linewidth=2)
+    ax.plot(CN_B, label='CN_B', marker='s', linewidth=2)
+    ax.set_xlabel('Data point index', fontweight='bold', fontsize=11)
+    ax.set_ylabel('Coordination Number', fontweight='bold', fontsize=11)
+    ax.set_title('Coordination Numbers Evolution', fontweight='bold', fontsize=12)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot14_cached(geometric_fit: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Plot 14: Lattice parameter evolution"""
+    fig, ax = plt.subplots(figsize=(6, 5))
+    
+    T = geometric_fit['T_data']
+    dl_exp = geometric_fit['dl_data']
+    dl_model = geometric_fit['dl_model']
+    
+    ax.scatter(T, dl_exp, s=style['point_size'], color=style['point_color'], 
+               alpha=style['point_alpha'], label='Experimental')
+    ax.plot(T, dl_model, '-', color=style['model_line_color'], 
+            linewidth=style['line_width'], label='Geometric model')
+    ax.set_xlabel('Temperature (°C)', fontweight='bold', fontsize=11)
+    ax.set_ylabel('ΔL/L₀', fontweight='bold', fontsize=11)
+    ax.set_title('Geometric Model Fit', fontweight='bold', fontsize=12)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot15_cached(geometric_fit: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Plot 15: Sublattice contributions to expansion"""
+    fig, ax = plt.subplots(figsize=(8, 5))
+    
+    contributions = geometric_fit['sublattice_contributions']
+    T = [c['T'] for c in contributions]
+    
+    a_A = [c['a_A'] for c in contributions]
+    a_B = [c['a_B'] for c in contributions]
+    a_O = [c['a_O'] for c in contributions]
+    a_total = [c['a_total'] for c in contributions]
+    
+    a_ref = geometric_fit['a_ref']
+    
+    dl_A = [(a - a_ref)/a_ref for a in a_A]
+    dl_B = [(a - a_ref)/a_ref for a in a_B]
+    dl_O = [(a - a_ref)/a_ref for a in a_O]
+    dl_total = [(a - a_ref)/a_ref for a in a_total]
+    
+    ax.fill_between(T, 0, dl_A, alpha=0.5, label='A-sublattice', color='red')
+    ax.fill_between(T, dl_A, np.array(dl_A) + np.array(dl_B), alpha=0.5, 
+                    label='B-sublattice', color='green')
+    ax.fill_between(T, np.array(dl_A) + np.array(dl_B), 
+                    np.array(dl_A) + np.array(dl_B) + np.array(dl_O), 
+                    alpha=0.5, label='Anion sublattice', color='blue')
+    ax.plot(T, dl_total, 'k-', linewidth=2, label='Total')
+    
+    ax.set_xlabel('Temperature (°C)', fontweight='bold', fontsize=11)
+    ax.set_ylabel('ΔL/L₀', fontweight='bold', fontsize=11)
+    ax.set_title('Sublattice Contributions to Expansion', fontweight='bold', fontsize=12)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot16_cached(geometric_fit: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Plot 16: Fitted r_V and r_OH comparison"""
+    fig, ax = plt.subplots(figsize=(6, 5))
+    
+    params = geometric_fit['params']
+    
+    literature_data = {
+        'r_V': {'BaZrO3': 1.18, 'SrZrO3': 1.15, 'CaZrO3': 1.12},
+        'r_OH': {'BaZrO3': 1.35, 'SrZrO3': 1.34, 'CaZrO3': 1.33}
+    }
+    
+    categories = ['r_V (Å)', 'r_OH (Å)']
+    fitted_values = [params['r_V'], params['r_OH']]
+    
+    x_pos = np.arange(len(categories))
+    ax.bar(x_pos, fitted_values, width=0.4, label='Fitted', color='blue', alpha=0.7)
+    
+    # Add literature comparison if available
+    ax.axhline(y=1.18, color='red', linestyle='--', alpha=0.7, label='Literature r_V (BaZrO₃)')
+    ax.axhline(y=1.35, color='orange', linestyle='--', alpha=0.7, label='Literature r_OH (BaZrO₃)')
+    
+    ax.set_ylabel('Effective Ionic Radius (Å)', fontweight='bold', fontsize=11)
+    ax.set_title('Fitted Effective Radii', fontweight='bold', fontsize=12)
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(categories)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    for i, v in enumerate(fitted_values):
+        ax.text(i, v + 0.02, f'{v:.3f}', ha='center', fontweight='bold')
+    
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot17_cached(geometric_fit: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Plot 17: Chemical expansion coefficient vs [OH]"""
+    fig, ax = plt.subplots(figsize=(6, 5))
+    
+    T = geometric_fit['T_data']
+    y = geometric_fit['y_data']
+    dl_model = geometric_fit['dl_model']
+    dl_exp = geometric_fit['dl_data']
+    
+    # Calculate local chemical expansion coefficient
+    chem_exp_coeff = np.gradient(dl_model, y) * y
+    
+    ax.plot(y, chem_exp_coeff * 1e3, 'o-', color=style['chemical_line_color'], 
+            linewidth=2, markersize=4)
+    ax.set_xlabel('[OH] concentration', fontweight='bold', fontsize=11)
+    ax.set_ylabel('Chemical Expansion Coefficient (10⁻³)', fontweight='bold', fontsize=11)
+    ax.set_title('Nonlinearity of Chemical Expansion', fontweight='bold', fontsize=12)
+    ax.grid(True, alpha=0.3)
+    
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot18_cached(geometric_fit: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Plot 18: Arrhenius-type plot for Kw(T)"""
+    fig, ax = plt.subplots(figsize=(6, 5))
+    
+    T = geometric_fit['T_data']
+    y = geometric_fit['y_data']
+    
+    # Calculate Kw from the model
+    x = st.session_state.model_params['Acc']['value'] if st.session_state.fit_results else 0.6
+    T_K = T + 273.15
+    R = 8.314
+    dH = st.session_state.fit_results['params']['dH'] if st.session_state.fit_results else -81.0
+    dS = st.session_state.fit_results['params']['dS'] if st.session_state.fit_results else -131.0
+    pH2O = st.session_state.fit_results['params']['pH2O'] if st.session_state.fit_results else 0.083
+    
+    Kw = np.exp(-dH * 1000 / (R * T_K) + dS / R)
+    
+    ax.plot(1000/T_K, np.log(Kw), 'o-', color='purple', linewidth=2, markersize=4)
+    
+    # Linear fit
+    coeffs = np.polyfit(1000/T_K, np.log(Kw), 1)
+    fit_line = coeffs[0] * 1000/T_K + coeffs[1]
+    ax.plot(1000/T_K, fit_line, 'r--', linewidth=1.5, 
+            label=f'Fit: slope = {coeffs[0]:.1f} K')
+    
+    ax.set_xlabel('1000/T (K⁻¹)', fontweight='bold', fontsize=11)
+    ax.set_ylabel('ln(K_w)', fontweight='bold', fontsize=11)
+    ax.set_title('Arrhenius Plot for Hydration Equilibrium', fontweight='bold', fontsize=12)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    fig.set_dpi(600)
+    return fig
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def create_plot19_cached(geometric_fit: Dict[str, Any], style: Dict[str, Any]) -> plt.Figure:
+    """Plot 19: Residual analysis for geometric model"""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+    
+    residuals = geometric_fit['residuals']
+    T = geometric_fit['T_data']
+    dl_model = geometric_fit['dl_model']
+    
+    # Residuals vs temperature
+    ax1.scatter(T, residuals, s=style['point_size'], color=style['point_color'], 
+                alpha=style['point_alpha'])
+    ax1.axhline(y=0, color='red', linestyle='--', linewidth=1.5)
+    ax1.set_xlabel('Temperature (°C)', fontweight='bold', fontsize=11)
+    ax1.set_ylabel('Residuals', fontweight='bold', fontsize=11)
+    ax1.set_title('Residuals vs Temperature', fontweight='bold', fontsize=12)
+    ax1.grid(True, alpha=0.3)
+    
+    # Residuals vs predicted
+    ax2.scatter(dl_model, residuals, s=style['point_size'], color=style['point_color'], 
+                alpha=style['point_alpha'])
+    ax2.axhline(y=0, color='red', linestyle='--', linewidth=1.5)
+    ax2.set_xlabel('Predicted ΔL/L₀', fontweight='bold', fontsize=11)
+    ax2.set_ylabel('Residuals', fontweight='bold', fontsize=11)
+    ax2.set_title('Residuals vs Fitted Values', fontweight='bold', fontsize=12)
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    fig.set_dpi(600)
+    return fig
 
 # ============================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -998,9 +1444,22 @@ def update_model_param(param_name: str, value: float, is_fixed: bool):
 def update_plot_style(param_name: str, value):
     """Update plot style parameter in session state"""
     st.session_state.plot_style[param_name] = value
-    # Trigger rerun only for plot updates, not full reload
     if st.session_state.fitting_complete:
         st.rerun()
+
+def get_available_b_cations(a_cation: str) -> list:
+    """Get available B-cations based on A-cation selection"""
+    if a_cation == 'La':
+        return ['In', 'Sc', 'Y', 'Yb']
+    else:
+        return ['Ce', 'Zr', 'Ti', 'Hf', 'Sn']
+
+def get_available_acc_cations(a_cation: str) -> list:
+    """Get available acceptor cations based on A-cation selection"""
+    if a_cation == 'La':
+        return ['Mg', 'Zn']
+    else:
+        return ['Al', 'Ga', 'In', 'Sc', 'Y', 'Yb', 'Ho', 'Dy', 'Gd', 'Sm', 'Nd', 'La']
 
 # ============================================
 # ОСНОВНОЙ ИНТЕРФЕЙС
@@ -1009,6 +1468,10 @@ def update_plot_style(param_name: str, value):
 def main():
     st.title("📈 Thermo-Mechanical Expansion Modeling")
     st.markdown("Modeling of proton-conducting oxides thermal expansion")
+    
+    # Initialize ionic radii database
+    if st.session_state.ionic_radii_db is None:
+        st.session_state.ionic_radii_db = parse_shannon_table()
     
     # Sidebar для ввода данных и параметров модели
     with st.sidebar:
@@ -1030,9 +1493,10 @@ def main():
                     st.session_state.experimental_data = parse_data_cached(data_text)
                     st.session_state.data_loaded = True
                     st.success(f"Loaded {len(st.session_state.experimental_data)} data points")
-                    # Reset fitting state when new data is loaded
                     st.session_state.fitting_complete = False
+                    st.session_state.geometric_fit_complete = False
                     st.session_state.fit_results = None
+                    st.session_state.geometric_fit_results = None
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
         
@@ -1044,13 +1508,14 @@ def main():
                     st.session_state.experimental_data = parse_data_cached(data_text)
                     st.session_state.data_loaded = True
                     st.success(f"Loaded {len(st.session_state.experimental_data)} data points")
-                    # Reset fitting state when new data is loaded
                     st.session_state.fitting_complete = False
+                    st.session_state.geometric_fit_complete = False
                     st.session_state.fit_results = None
+                    st.session_state.geometric_fit_results = None
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
         
-        else:  # Example data
+        else:
             if st.button("Load Example Data"):
                 example_data = """20\t0.0045
 40\t0.004787988
@@ -1062,9 +1527,43 @@ def main():
                 st.session_state.experimental_data = parse_data_cached(example_data)
                 st.session_state.data_loaded = True
                 st.success(f"Loaded {len(st.session_state.experimental_data)} example data points")
-                # Reset fitting state when new data is loaded
                 st.session_state.fitting_complete = False
+                st.session_state.geometric_fit_complete = False
                 st.session_state.fit_results = None
+                st.session_state.geometric_fit_results = None
+        
+        st.divider()
+        
+        # Cation Selection
+        st.header("Cation Selection")
+        
+        A_cation = st.selectbox(
+            "A-site cation",
+            ['Ba', 'Sr', 'Ca', 'La'],
+            index=['Ba', 'Sr', 'Ca', 'La'].index(st.session_state.cation_selection['A_cation'])
+        )
+        
+        available_B = get_available_b_cations(A_cation)
+        B_cation = st.selectbox(
+            "B-site cation",
+            available_B,
+            index=available_B.index(st.session_state.cation_selection['B_cation']) 
+            if st.session_state.cation_selection['B_cation'] in available_B else 0
+        )
+        
+        available_Acc = get_available_acc_cations(A_cation)
+        Acc_cation = st.selectbox(
+            "Acceptor cation (Acc)",
+            available_Acc,
+            index=available_Acc.index(st.session_state.cation_selection['Acc_cation'])
+            if st.session_state.cation_selection['Acc_cation'] in available_Acc else 0
+        )
+        
+        st.session_state.cation_selection = {
+            'A_cation': A_cation,
+            'B_cation': B_cation,
+            'Acc_cation': Acc_cation
+        }
         
         st.divider()
         
@@ -1072,51 +1571,49 @@ def main():
         st.header("Model Parameters")
         st.markdown("Check 'Fix' to keep parameter constant during fitting")
         
-        # Используем форму для предотвращения постоянных перезагрузок
         with st.form("model_params_form"):
             col1, col2 = st.columns(2)
             
             with col1:
-                # Получаем текущие значения из session state
                 acc_value = st.number_input(
                     "[Acc]", 
                     value=st.session_state.model_params['Acc']['value'],
                     step=0.01, 
                     format="%.4f",
-                    key=f"acc_input_{st.session_state.model_params['Acc']['value']}"  # Динамический ключ
+                    key=f"acc_input_{st.session_state.model_params['Acc']['value']}"
                 )
                 acc_fixed = st.checkbox("Fix", value=st.session_state.model_params['Acc']['fixed'], 
-                                       key=f"acc_fix_{st.session_state.model_params['Acc']['fixed']}")  # Динамический ключ
+                                       key=f"acc_fix_{st.session_state.model_params['Acc']['fixed']}")
                 
                 alpha_value = st.number_input(
                     "α·10⁶", 
                     value=st.session_state.model_params['alpha_1e6']['value'],
                     step=0.1, 
                     format="%.4f",
-                    key=f"alpha_input_{st.session_state.model_params['alpha_1e6']['value']}"  # Динамический ключ
+                    key=f"alpha_input_{st.session_state.model_params['alpha_1e6']['value']}"
                 )
                 alpha_fixed = st.checkbox("Fix", value=st.session_state.model_params['alpha_1e6']['fixed'],
-                                         key=f"alpha_fix_{st.session_state.model_params['alpha_1e6']['fixed']}")  # Динамический ключ
+                                         key=f"alpha_fix_{st.session_state.model_params['alpha_1e6']['fixed']}")
                 
                 beta_value = st.number_input(
                     "β", 
                     value=st.session_state.model_params['beta']['value'],
                     step=0.001, 
                     format="%.4f",
-                    key=f"beta_input_{st.session_state.model_params['beta']['value']}"  # Динамический ключ
+                    key=f"beta_input_{st.session_state.model_params['beta']['value']}"
                 )
                 beta_fixed = st.checkbox("Fix", value=st.session_state.model_params['beta']['fixed'],
-                                        key=f"beta_fix_{st.session_state.model_params['beta']['fixed']}")  # Динамический ключ
+                                        key=f"beta_fix_{st.session_state.model_params['beta']['fixed']}")
                 
                 dH_value = st.number_input(
                     "ΔH (kJ/mol)", 
                     value=st.session_state.model_params['dH']['value'],
                     step=1.0, 
                     format="%.2f",
-                    key=f"dH_input_{st.session_state.model_params['dH']['value']}"  # Динамический ключ
+                    key=f"dH_input_{st.session_state.model_params['dH']['value']}"
                 )
                 dH_fixed = st.checkbox("Fix", value=st.session_state.model_params['dH']['fixed'],
-                                      key=f"dH_fix_{st.session_state.model_params['dH']['fixed']}")  # Динамический ключ
+                                      key=f"dH_fix_{st.session_state.model_params['dH']['fixed']}")
             
             with col2:
                 dS_value = st.number_input(
@@ -1124,39 +1621,37 @@ def main():
                     value=st.session_state.model_params['dS']['value'],
                     step=1.0, 
                     format="%.2f",
-                    key=f"dS_input_{st.session_state.model_params['dS']['value']}"  # Динамический ключ
+                    key=f"dS_input_{st.session_state.model_params['dS']['value']}"
                 )
                 dS_fixed = st.checkbox("Fix", value=st.session_state.model_params['dS']['fixed'],
-                                      key=f"dS_fix_{st.session_state.model_params['dS']['fixed']}")  # Динамический ключ
+                                      key=f"dS_fix_{st.session_state.model_params['dS']['fixed']}")
                 
                 pH2O_value = st.number_input(
                     "pH₂O", 
                     value=st.session_state.model_params['pH2O']['value'],
                     step=0.001, 
                     format="%.4f",
-                    key=f"pH2O_input_{st.session_state.model_params['pH2O']['value']}"  # Динамический ключ
+                    key=f"pH2O_input_{st.session_state.model_params['pH2O']['value']}"
                 )
                 pH2O_fixed = st.checkbox("Fix", value=st.session_state.model_params['pH2O']['fixed'],
-                                        key=f"pH2O_fix_{st.session_state.model_params['pH2O']['fixed']}")  # Динамический ключ
+                                        key=f"pH2O_fix_{st.session_state.model_params['pH2O']['fixed']}")
                 
                 residue_value = st.number_input(
                     "Residue", 
                     value=st.session_state.model_params['residue']['value'],
                     step=0.0001, 
                     format="%.6f",
-                    key=f"residue_input_{st.session_state.model_params['residue']['value']}"  # Динамический ключ
+                    key=f"residue_input_{st.session_state.model_params['residue']['value']}"
                 )
                 residue_fixed = st.checkbox("Fix", value=st.session_state.model_params['residue']['fixed'],
-                                           key=f"residue_fix_{st.session_state.model_params['residue']['fixed']}")  # Динамический ключ
+                                           key=f"residue_fix_{st.session_state.model_params['residue']['fixed']}")
             
-            # Кнопка фиттинга внутри формы
             fit_button = st.form_submit_button("🚀 Fit Model and Create Plots", type="primary", use_container_width=True)
             
             if fit_button:
                 if st.session_state.experimental_data is None:
                     st.error("Please load data first!")
                 else:
-                    # Обновляем значения параметров в session state из формы
                     param_updates = [
                         ('Acc', acc_value, acc_fixed),
                         ('alpha_1e6', alpha_value, alpha_fixed),
@@ -1170,7 +1665,6 @@ def main():
                     for param_name, value, is_fixed in param_updates:
                         update_model_param(param_name, value, is_fixed)
                     
-                    # Prepare parameters for fitting
                     fixed_params = {}
                     initial_guess = {}
                     
@@ -1188,7 +1682,6 @@ def main():
                         fixed_params[name] = value if is_fixed else None
                         initial_guess[name] = value
                         
-                        # Set bounds for each parameter
                         if name == 'Acc':
                             initial_guess[f'{name}_bounds'] = (0.001, 0.9)
                         elif name == 'alpha_1e6':
@@ -1204,7 +1697,6 @@ def main():
                         elif name == 'residue':
                             initial_guess[f'{name}_bounds'] = (-0.05, 0.05)
                     
-                    # Perform fitting
                     with st.spinner("Fitting model..."):
                         start_time = time.time()
                         st.session_state.fit_results = fit_model_cached(
@@ -1221,22 +1713,82 @@ def main():
                                 'initial_guess': initial_guess
                             }
                             
-                            # !!! НОВЫЙ КОД: Обновляем параметры в session state значениями из фиттинга
-                            # для параметров, которые не были зафиксированы
                             for param_name in ['Acc', 'alpha_1e6', 'beta', 'dH', 'dS', 'pH2O', 'residue']:
-                                # Если параметр не был зафиксирован (т.е. подгонялся), обновляем его значение
                                 if not st.session_state.model_params[param_name]['fixed']:
                                     fitted_value = st.session_state.fit_results['params'][param_name]
                                     st.session_state.model_params[param_name]['value'] = fitted_value
                             
                             st.success(f"Fitting completed in {end_time - start_time:.2f} seconds")
-                            st.rerun()  # Добавляем rerun для обновления отображаемых значений в форме
+                            st.rerun()
                         else:
                             st.error("Fitting failed. Please check your parameters.")
         
         st.divider()
         
-        # Plot Settings (отдельно, чтобы не триггерить фиттинг)
+        # Geometric Model Fitting Section
+        if st.session_state.fitting_complete and st.session_state.fit_results is not None:
+            st.header("Geometric Model (Stage 2)")
+            st.markdown("Fit effective ionic radii r_V and r_OH")
+            
+            with st.form("geometric_fit_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    fit_r_V = st.checkbox("Fit r_V", value=True)
+                    initial_r_V = st.number_input("Initial r_V (Å)", value=1.18, step=0.01, format="%.3f")
+                
+                with col2:
+                    fit_r_OH = st.checkbox("Fit r_OH", value=True)
+                    initial_r_OH = st.number_input("Initial r_OH (Å)", value=1.35, step=0.01, format="%.3f")
+                
+                col3, col4 = st.columns(2)
+                with col3:
+                    fit_alpha_geo = st.checkbox("Refit α", value=False)
+                    initial_alpha_geo = st.number_input("Initial α (K⁻¹)", 
+                                                         value=st.session_state.fit_results['params']['alpha_1e6']/1e6,
+                                                         step=1e-6, format="%.2e")
+                
+                with col4:
+                    fit_gamma_geo = st.checkbox("Refit γ", value=False)
+                    initial_gamma_geo = st.number_input("Initial γ", 
+                                                         value=st.session_state.fit_results['params']['residue'],
+                                                         step=0.0001, format="%.5f")
+                
+                geometric_fit_button = st.form_submit_button("🔬 Fit Geometric Model", type="primary", use_container_width=True)
+                
+                if geometric_fit_button:
+                    x = st.session_state.model_params['Acc']['value']
+                    alpha = st.session_state.fit_results['params']['alpha_1e6'] / 1e6
+                    gamma = st.session_state.fit_results['params']['residue']
+                    T_ref = st.session_state.fit_results['T_start']
+                    oh = st.session_state.fit_results['oh_concentration']
+                    
+                    with st.spinner("Fitting geometric model..."):
+                        geometric_results = fit_geometric_model_cached(
+                            st.session_state.experimental_data,
+                            oh,
+                            x,
+                            st.session_state.cation_selection['A_cation'],
+                            st.session_state.cation_selection['B_cation'],
+                            st.session_state.cation_selection['Acc_cation'],
+                            st.session_state.ionic_radii_db,
+                            alpha, gamma, T_ref,
+                            initial_r_V, initial_r_OH,
+                            fit_r_V, fit_r_OH,
+                            fit_alpha_geo, fit_gamma_geo
+                        )
+                        
+                        if geometric_results is not None:
+                            st.session_state.geometric_fit_results = geometric_results
+                            st.session_state.geometric_fit_complete = True
+                            st.success("Geometric model fitting completed!")
+                            st.rerun()
+                        else:
+                            st.error("Geometric fitting failed. Check parameters.")
+        
+        st.divider()
+        
+        # Plot Settings
         st.header("Plot Settings")
         
         with st.expander("Customize Plot Appearance", expanded=False):
@@ -1325,7 +1877,6 @@ def main():
                 if new_bar_chemical_color != st.session_state.plot_style['bar_chemical_color']:
                     update_plot_style('bar_chemical_color', new_bar_chemical_color)
             
-            # Additional plot settings
             col1, col2 = st.columns(2)
             with col1:
                 new_point_size = st.slider(
@@ -1364,15 +1915,12 @@ def main():
     # ОСНОВНОЙ КОНТЕНТ
     # ============================================
     
-    # Display loaded data
     if st.session_state.experimental_data is not None:
         st.header("Loaded Data Preview")
         
-        # Display data table
         df = pd.DataFrame(st.session_state.experimental_data, columns=['Temperature (°C)', 'ΔL/L₀'])
         st.dataframe(df, use_container_width=True)
         
-        # Quick plot of raw data
         fig_raw, ax_raw = plt.subplots(figsize=(6, 3))
         ax_raw.scatter(df['Temperature (°C)'], df['ΔL/L₀'], s=40, 
                       color=st.session_state.plot_style['point_color'], 
@@ -1385,11 +1933,9 @@ def main():
         fig_raw.set_dpi(600)
         st.pyplot(fig_raw)
     
-    # Display fitting results if available
     if st.session_state.fit_results is not None and st.session_state.fitting_complete:
-        st.header("Fitting Results")
+        st.header("Fitting Results (Stage 1)")
         
-        # Display metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("MSE", f"{st.session_state.fit_results['mse']:.3e}")
@@ -1402,7 +1948,6 @@ def main():
             chi2_label = "χ²_red" if not np.isnan(chi2_value) else "χ²"
             st.metric(chi2_label, f"{chi2_value:.6f}")
         
-        # Metric explanations
         with st.expander("📊 Metric Explanations (for scientific paper)"):
             explanations = get_metric_explanation()
             for metric, info in explanations.items():
@@ -1412,22 +1957,17 @@ def main():
                 st.markdown(f"**Units:** {info['units']}")
                 st.markdown("---")
         
-        # Display parameters - используем актуальные значения из session state
         st.subheader("Model Parameters")
         
-        # Получаем актуальные значения параметров
         params_data = []
         for param_name in ['Acc', 'alpha_1e6', 'beta', 'dH', 'dS', 'pH2O', 'residue']:
-            # Для фиксированных параметров показываем значения из session_state
             if st.session_state.model_params[param_name]['fixed']:
                 value = st.session_state.model_params[param_name]['value']
                 status = "Fixed"
             else:
-                # Для подогнанных параметров показываем результаты фиттинга
                 value = st.session_state.fit_results['params'][param_name]
                 status = "Fitted"
             
-            # Форматируем название параметра для отображения
             display_name = param_name
             if param_name == 'alpha_1e6':
                 display_name = 'α·10⁶'
@@ -1448,9 +1988,8 @@ def main():
         st.dataframe(params_df.style.format({"Value": "{:.6f}"}), use_container_width=True)
         
         st.divider()
-        st.header("Plots")
+        st.header("Plots (Stage 1)")
         
-        # Создаём вкладки для лучшей организации множества графиков
         tab1, tab2, tab3, tab4 = st.tabs([
             "📈 Basic Plots", 
             "🔍 Advanced Analysis", 
@@ -1461,7 +2000,6 @@ def main():
         with tab1:
             st.subheader("Basic Analysis Plots")
             
-            # Create basic plots
             plot1 = create_plot1_cached(st.session_state.fit_results, st.session_state.plot_style)
             plot2 = create_plot2_cached(st.session_state.fit_results, st.session_state.plot_style)
             plot3 = create_plot3_cached(st.session_state.fit_results, st.session_state.plot_style)
@@ -1486,7 +2024,6 @@ def main():
         with tab2:
             st.subheader("Advanced Analysis Plots")
             
-            # Create correlation plots
             plot5 = create_plot5_cached(st.session_state.fit_results, st.session_state.plot_style)
             plot6 = create_plot6_cached(st.session_state.fit_results, st.session_state.plot_style)
             plot9 = create_plot9_cached(st.session_state.fit_results, st.session_state.plot_style)
@@ -1515,7 +2052,6 @@ def main():
         with tab3:
             st.subheader("Statistical Analysis Plots")
             
-            # Create statistical plots
             plot10 = create_plot10_cached(st.session_state.fit_results, st.session_state.plot_style)
             plot12 = create_plot12_cached(st.session_state.fit_results, st.session_state.plot_style)
             
@@ -1548,7 +2084,6 @@ def main():
         with tab4:
             st.subheader("Model Insights Plots")
             
-            # Create insight plots
             plot7 = create_plot7_cached(st.session_state.fit_results, st.session_state.plot_style)
             plot8 = create_plot8_cached(st.session_state.fit_results, st.session_state.plot_style)
             plot11 = create_plot11_cached(st.session_state.fit_results, st.session_state.plot_style)
@@ -1578,11 +2113,65 @@ def main():
             - Inflection points indicate changes in reaction kinetics
             """)
         
+        # Geometric Model Results
+        if st.session_state.geometric_fit_complete and st.session_state.geometric_fit_results is not None:
+            st.divider()
+            st.header("Geometric Model Results (Stage 2)")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("r_V (Å)", f"{st.session_state.geometric_fit_results['params']['r_V']:.4f}")
+            with col2:
+                st.metric("r_OH (Å)", f"{st.session_state.geometric_fit_results['params']['r_OH']:.4f}")
+            with col3:
+                st.metric("R² (Geometric)", f"{st.session_state.geometric_fit_results['r2']:.6f}")
+            
+            st.subheader("Geometric Model Plots")
+            
+            tab5, tab6 = st.tabs(["📐 Geometric Analysis", "📊 Geometric Statistics"])
+            
+            with tab5:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    plot13 = create_plot13_cached(st.session_state.geometric_fit_results, st.session_state.plot_style)
+                    st.markdown("**Coordination Numbers Evolution**")
+                    st.pyplot(plot13)
+                    
+                    plot15 = create_plot15_cached(st.session_state.geometric_fit_results, st.session_state.plot_style)
+                    st.markdown("**Sublattice Contributions**")
+                    st.pyplot(plot15)
+                
+                with col2:
+                    plot14 = create_plot14_cached(st.session_state.geometric_fit_results, st.session_state.plot_style)
+                    st.markdown("**Geometric Model Fit**")
+                    st.pyplot(plot14)
+                    
+                    plot16 = create_plot16_cached(st.session_state.geometric_fit_results, st.session_state.plot_style)
+                    st.markdown("**Fitted Effective Radii**")
+                    st.pyplot(plot16)
+            
+            with tab6:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    plot17 = create_plot17_cached(st.session_state.geometric_fit_results, st.session_state.plot_style)
+                    st.markdown("**Chemical Expansion Nonlinearity**")
+                    st.pyplot(plot17)
+                    
+                    plot18 = create_plot18_cached(st.session_state.geometric_fit_results, st.session_state.plot_style)
+                    st.markdown("**Arrhenius Plot for Hydration**")
+                    st.pyplot(plot18)
+                
+                with col2:
+                    plot19 = create_plot19_cached(st.session_state.geometric_fit_results, st.session_state.plot_style)
+                    st.markdown("**Geometric Model Residuals**")
+                    st.pyplot(plot19)
+        
         # Download section
         st.divider()
         st.subheader("Export Results")
         
-        # Download plots - организовано по вкладкам
         download_tab1, download_tab2, download_tab3, download_tab4 = st.tabs([
             "📥 Basic Plots", 
             "📥 Advanced Plots", 
@@ -1738,13 +2327,104 @@ def main():
                         key="dl_btn_plot11"
                     )
         
+        # Download geometric plots if available
+        if st.session_state.geometric_fit_complete:
+            st.divider()
+            st.subheader("Export Geometric Model Results")
+            
+            geo_tab1, geo_tab2 = st.tabs(["📐 Geometric Plots", "📊 Geometric Statistics"])
+            
+            with geo_tab1:
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("📥 Download Plot 13 (CN Evolution)", key="dl_plot13"):
+                        buf = io.BytesIO()
+                        plot13.savefig(buf, format='png', dpi=600)
+                        st.download_button(
+                            label="Download PNG (600 DPI)",
+                            data=buf.getvalue(),
+                            file_name="plot13_cn_evolution.png",
+                            mime="image/png",
+                            key="dl_btn_plot13"
+                        )
+                    
+                    if st.button("📥 Download Plot 15 (Sublattice Contributions)", key="dl_plot15"):
+                        buf = io.BytesIO()
+                        plot15.savefig(buf, format='png', dpi=600)
+                        st.download_button(
+                            label="Download PNG (600 DPI)",
+                            data=buf.getvalue(),
+                            file_name="plot15_sublattice_contributions.png",
+                            mime="image/png",
+                            key="dl_btn_plot15"
+                        )
+                
+                with col2:
+                    if st.button("📥 Download Plot 14 (Geometric Fit)", key="dl_plot14"):
+                        buf = io.BytesIO()
+                        plot14.savefig(buf, format='png', dpi=600)
+                        st.download_button(
+                            label="Download PNG (600 DPI)",
+                            data=buf.getvalue(),
+                            file_name="plot14_geometric_fit.png",
+                            mime="image/png",
+                            key="dl_btn_plot14"
+                        )
+                    
+                    if st.button("📥 Download Plot 16 (Fitted Radii)", key="dl_plot16"):
+                        buf = io.BytesIO()
+                        plot16.savefig(buf, format='png', dpi=600)
+                        st.download_button(
+                            label="Download PNG (600 DPI)",
+                            data=buf.getvalue(),
+                            file_name="plot16_fitted_radii.png",
+                            mime="image/png",
+                            key="dl_btn_plot16"
+                        )
+            
+            with geo_tab2:
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("📥 Download Plot 17 (Chem Expansion)", key="dl_plot17"):
+                        buf = io.BytesIO()
+                        plot17.savefig(buf, format='png', dpi=600)
+                        st.download_button(
+                            label="Download PNG (600 DPI)",
+                            data=buf.getvalue(),
+                            file_name="plot17_chem_expansion.png",
+                            mime="image/png",
+                            key="dl_btn_plot17"
+                        )
+                    
+                    if st.button("📥 Download Plot 18 (Arrhenius)", key="dl_plot18"):
+                        buf = io.BytesIO()
+                        plot18.savefig(buf, format='png', dpi=600)
+                        st.download_button(
+                            label="Download PNG (600 DPI)",
+                            data=buf.getvalue(),
+                            file_name="plot18_arrhenius.png",
+                            mime="image/png",
+                            key="dl_btn_plot18"
+                        )
+                
+                with col2:
+                    if st.button("📥 Download Plot 19 (Geo Residuals)", key="dl_plot19"):
+                        buf = io.BytesIO()
+                        plot19.savefig(buf, format='png', dpi=600)
+                        st.download_button(
+                            label="Download PNG (600 DPI)",
+                            data=buf.getvalue(),
+                            file_name="plot19_geometric_residuals.png",
+                            mime="image/png",
+                            key="dl_btn_plot19"
+                        )
+        
         # Download data
         st.divider()
         st.subheader("Download Data")
         
         col1, col2 = st.columns(2)
         with col1:
-            # Download fitted data as CSV
             if st.button("📊 Download Fitted Data (CSV)", key="dl_csv"):
                 fitted_df = pd.DataFrame({
                     'Temperature_C': st.session_state.fit_results['T_data'],
@@ -1767,9 +2447,8 @@ def main():
                 )
         
         with col2:
-            # Download parameters as text
             if st.button("⚙️ Download Parameters (TXT)", key="dl_params"):
-                params_text = f"""FITTING RESULTS
+                params_text = f"""FITTING RESULTS (Stage 1)
 ================
 MSE: {st.session_state.fit_results['mse']:.6e}
 RMSE: {st.session_state.fit_results['rmse']:.6e}
@@ -1778,7 +2457,7 @@ R²: {st.session_state.fit_results['r2']:.6f}
 N points: {st.session_state.fit_results['N_points']}
 Fitted parameters: {st.session_state.fit_results['n_free_params']}
 
-MODEL PARAMETERS
+MODEL PARAMETERS (Stage 1)
 ================
 [Acc] = {st.session_state.fit_results['params']['Acc']:.6f}
 α·10⁶ = {st.session_state.fit_results['params']['alpha_1e6']:.6f}
@@ -1788,9 +2467,24 @@ MODEL PARAMETERS
 pH₂O = {st.session_state.fit_results['params']['pH2O']:.6f}
 Residue = {st.session_state.fit_results['params']['residue']:.6f}
 
-Fitted parameters: {', '.join(st.session_state.fit_results['vary_params'])}
-Fixed parameters: {', '.join([k for k, v in st.session_state.fit_results['fixed_params'].items() if v is not None])}
+CATION COMPOSITION
+================
+A-cation: {st.session_state.cation_selection['A_cation']}
+B-cation: {st.session_state.cation_selection['B_cation']}
+Acceptor: {st.session_state.cation_selection['Acc_cation']}
 """
+                
+                if st.session_state.geometric_fit_complete:
+                    params_text += f"""
+GEOMETRIC MODEL RESULTS (Stage 2)
+================
+r_V = {st.session_state.geometric_fit_results['params']['r_V']:.6f} Å
+r_OH = {st.session_state.geometric_fit_results['params']['r_OH']:.6f} Å
+R² (Geometric) = {st.session_state.geometric_fit_results['r2']:.6f}
+MSE (Geometric) = {st.session_state.geometric_fit_results['mse']:.6e}
+Fitted parameters: {', '.join(st.session_state.geometric_fit_results['vary_params'])}
+"""
+                
                 st.download_button(
                     label="Download Parameters",
                     data=params_text,
@@ -1800,17 +2494,15 @@ Fixed parameters: {', '.join([k for k, v in st.session_state.fit_results['fixed_
                 )
     
     else:
-        # Instructions
         st.info("👈 Please load data and configure parameters in the sidebar, then click 'Fit Model and Create Plots'")
     
-    # Footer
     st.divider()
     st.markdown("---")
     st.markdown(
         """
         <div style='text-align: center'>
             <p>Thermo-Mechanical Expansion Modeling Tool | For scientific publications | 600 DPI export</p>
-            <p>Includes 12 comprehensive plots for detailed analysis</p>
+            <p>Includes 19 comprehensive plots for detailed analysis (12 standard + 7 geometric)</p>
         </div>
         """,
         unsafe_allow_html=True
