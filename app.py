@@ -58,7 +58,6 @@ def initialize_session_state():
         'experimental_data': None,
         'fit_results': None,
         'last_fit_params': None,
-        'temperature_mode': 'auto',  # Новая переменная: 'heating', 'cooling', или 'auto'
         'plot_style': {
             'point_color': '#1f77b4',
             'point_alpha': 0.8,
@@ -163,8 +162,9 @@ def model_func_cached(T: np.ndarray, Acc: float, alpha_1e6: float, beta: float,
     return dl_dl0
 
 @st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any], 
-                    initial_guess: Dict[str, Any], temperature_mode: str = 'auto') -> Optional[Dict[str, Any]]:
+                    initial_guess: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Perform model fitting with caching"""
     T_data = data[:, 0]
     dl_data = data[:, 1]
@@ -290,8 +290,7 @@ def fit_model_cached(data: np.ndarray, fixed_params: Dict[str, Any],
             'T_data': T_data,
             'dl_data': dl_data,
             'fixed_params': fixed_params,
-            'initial_guess': initial_guess,
-            'temperature_mode': temperature_mode  # Сохраняем режим в результатах
+            'initial_guess': initial_guess
         }
     
     except Exception as e:
@@ -375,20 +374,10 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     chem_contrib = fit_results['chem_contrib']
     residue = fit_results['params']['residue']
     
-    # Получаем режим температуры из результатов фиттинга
-    temperature_mode = fit_results.get('temperature_mode', 'auto')
-    
-    # Определяем направление изменения температуры на основе выбранного режима
+    # Определяем направление изменения температуры (нагрев или охлаждение)
     T_diff = T[-1] - T[0]
     
-    if temperature_mode == 'heating':
-        is_heating = True
-    elif temperature_mode == 'cooling':
-        is_heating = False
-    else:  # 'auto' режим - используем автоматическое определение
-        is_heating = T_diff > 0
-    
-    if is_heating:  # Нагрев (температура растёт)
+    if T_diff > 0:  # Нагрев (температура растёт)
         # Тепловое изменение: расширение при нагреве (положительное)
         thermal_start = thermal_contrib[0] + residue
         thermal_changes = (thermal_contrib + residue) - thermal_start
@@ -417,14 +406,8 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3, linestyle='--', axis='y')
     
-    # Добавляем аннотацию о направлении на основе выбранного режима
-    if temperature_mode == 'heating':
-        direction = "Heating (forced)"
-    elif temperature_mode == 'cooling':
-        direction = "Cooling (forced)"
-    else:
-        direction = "Heating" if T_diff > 0 else "Cooling"
-    
+    # Добавляем аннотацию о направлении
+    direction = "Heating" if T_diff > 0 else "Cooling"
     ax.text(0.98, 0.98, direction, transform=ax.transAxes,
            ha='right', va='top', fontweight='bold',
            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
@@ -1042,22 +1025,6 @@ def main():
                 height=200,
                 help="Separators: tab, space, comma, or semicolon"
             )
-            
-            # НОВЫЙ КОД: Добавляем выбор режима температуры
-            st.markdown("**Temperature Mode Selection:**")
-            temperature_mode = st.radio(
-                "Select data interpretation mode:",
-                options=['auto', 'heating', 'cooling'],
-                format_func=lambda x: {
-                    'auto': 'Auto-detect (based on T order)',
-                    'heating': 'Heating (forced)',
-                    'cooling': 'Cooling (forced)'
-                }[x],
-                index=['auto', 'heating', 'cooling'].index(st.session_state.temperature_mode),
-                help="Choose 'Auto' for automatic detection based on temperature order, or force 'Heating'/'Cooling' mode"
-            )
-            st.session_state.temperature_mode = temperature_mode
-            
             if st.button("Load Data", type="primary"):
                 try:
                     st.session_state.experimental_data = parse_data_cached(data_text)
@@ -1071,22 +1038,6 @@ def main():
         
         elif data_option == "File upload":
             uploaded_file = st.file_uploader("Choose a file", type=['txt', 'csv', 'dat'])
-            
-            # НОВЫЙ КОД: Добавляем выбор режима температуры
-            st.markdown("**Temperature Mode Selection:**")
-            temperature_mode = st.radio(
-                "Select data interpretation mode:",
-                options=['auto', 'heating', 'cooling'],
-                format_func=lambda x: {
-                    'auto': 'Auto-detect (based on T order)',
-                    'heating': 'Heating (forced)',
-                    'cooling': 'Cooling (forced)'
-                }[x],
-                index=['auto', 'heating', 'cooling'].index(st.session_state.temperature_mode),
-                help="Choose 'Auto' for automatic detection based on temperature order, or force 'Heating'/'Cooling' mode"
-            )
-            st.session_state.temperature_mode = temperature_mode
-            
             if uploaded_file is not None:
                 try:
                     data_text = uploaded_file.getvalue().decode()
@@ -1100,21 +1051,6 @@ def main():
                     st.error(f"Error: {str(e)}")
         
         else:  # Example data
-            # НОВЫЙ КОД: Добавляем выбор режима температуры
-            st.markdown("**Temperature Mode Selection:**")
-            temperature_mode = st.radio(
-                "Select data interpretation mode:",
-                options=['auto', 'heating', 'cooling'],
-                format_func=lambda x: {
-                    'auto': 'Auto-detect (based on T order)',
-                    'heating': 'Heating (forced)',
-                    'cooling': 'Cooling (forced)'
-                }[x],
-                index=['auto', 'heating', 'cooling'].index(st.session_state.temperature_mode),
-                help="Choose 'Auto' for automatic detection based on temperature order, or force 'Heating'/'Cooling' mode"
-            )
-            st.session_state.temperature_mode = temperature_mode
-            
             if st.button("Load Example Data"):
                 example_data = """20\t0.0045
 40\t0.004787988
@@ -1268,14 +1204,13 @@ def main():
                         elif name == 'residue':
                             initial_guess[f'{name}_bounds'] = (-0.05, 0.05)
                     
-                    # Perform fitting with temperature mode
+                    # Perform fitting
                     with st.spinner("Fitting model..."):
                         start_time = time.time()
                         st.session_state.fit_results = fit_model_cached(
                             st.session_state.experimental_data, 
                             fixed_params, 
-                            initial_guess,
-                            st.session_state.temperature_mode  # Передаем выбранный режим
+                            initial_guess
                         )
                         end_time = time.time()
                         
@@ -1511,15 +1446,6 @@ def main():
         
         params_df = pd.DataFrame(params_data)
         st.dataframe(params_df.style.format({"Value": "{:.6f}"}), use_container_width=True)
-        
-        # Display temperature mode information
-        st.subheader("Temperature Mode Information")
-        temp_mode_display = {
-            'auto': 'Auto-detected based on data order',
-            'heating': 'Heating mode (forced by user)',
-            'cooling': 'Cooling mode (forced by user)'
-        }
-        st.info(f"**Current temperature interpretation:** {temp_mode_display.get(st.session_state.fit_results.get('temperature_mode', 'auto'), 'Unknown')}")
         
         st.divider()
         st.header("Plots")
@@ -1851,7 +1777,6 @@ R²: {st.session_state.fit_results['r2']:.6f}
 χ²: {st.session_state.fit_results['chi2']:.6f}
 N points: {st.session_state.fit_results['N_points']}
 Fitted parameters: {st.session_state.fit_results['n_free_params']}
-Temperature mode: {st.session_state.fit_results.get('temperature_mode', 'auto')}
 
 MODEL PARAMETERS
 ================
