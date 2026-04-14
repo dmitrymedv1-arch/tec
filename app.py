@@ -58,6 +58,7 @@ def initialize_session_state():
         'experimental_data': None,
         'fit_results': None,
         'last_fit_params': None,
+        'invert_data': False,  # NEW: flag for data inversion
         'plot_style': {
             'point_color': '#1f77b4',
             'point_alpha': 0.8,
@@ -125,6 +126,12 @@ def parse_data_cached(data_string: str) -> np.ndarray:
         raise ValueError("Unable to parse data. Check the format.")
     
     return np.array(data)
+
+def invert_data_if_needed(data: np.ndarray, should_invert: bool) -> np.ndarray:
+    """Invert data order if needed (for reversed temperature recording)"""
+    if should_invert and data is not None:
+        return np.flipud(data)
+    return data
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def calculate_oh_cached(T: np.ndarray, Acc: float, dH: float, dS: float, pH2O: float) -> Tuple[np.ndarray, np.ndarray]:
@@ -1025,46 +1032,97 @@ def main():
                 height=200,
                 help="Separators: tab, space, comma, or semicolon"
             )
-            if st.button("Load Data", type="primary"):
-                try:
-                    st.session_state.experimental_data = parse_data_cached(data_text)
-                    st.session_state.data_loaded = True
-                    st.success(f"Loaded {len(st.session_state.experimental_data)} data points")
-                    # Reset fitting state when new data is loaded
-                    st.session_state.fitting_complete = False
-                    st.session_state.fit_results = None
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
+            
+            # NEW: Checkbox for data inversion
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                invert_checkbox = st.checkbox(
+                    "Invert data (reverse order)", 
+                    value=st.session_state.invert_data,
+                    key="invert_manual_checkbox",
+                    help="Enable if your data is recorded in cooling mode (temperature decreasing) but represents a heating experiment"
+                )
+            
+            with col2:
+                if st.button("Load Data", type="primary", key="load_manual_btn"):
+                    try:
+                        raw_data = parse_data_cached(data_text)
+                        # Apply inversion if checkbox is checked
+                        st.session_state.experimental_data = invert_data_if_needed(raw_data, invert_checkbox)
+                        st.session_state.invert_data = invert_checkbox
+                        st.session_state.data_loaded = True
+                        st.success(f"Loaded {len(st.session_state.experimental_data)} data points")
+                        if invert_checkbox:
+                            st.info("Data has been inverted (order reversed) for heating analysis")
+                        # Reset fitting state when new data is loaded
+                        st.session_state.fitting_complete = False
+                        st.session_state.fit_results = None
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
         
         elif data_option == "File upload":
             uploaded_file = st.file_uploader("Choose a file", type=['txt', 'csv', 'dat'])
             if uploaded_file is not None:
                 try:
                     data_text = uploaded_file.getvalue().decode()
-                    st.session_state.experimental_data = parse_data_cached(data_text)
-                    st.session_state.data_loaded = True
-                    st.success(f"Loaded {len(st.session_state.experimental_data)} data points")
-                    # Reset fitting state when new data is loaded
-                    st.session_state.fitting_complete = False
-                    st.session_state.fit_results = None
+                    raw_data = parse_data_cached(data_text)
+                    
+                    # NEW: Checkbox for data inversion
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        invert_checkbox = st.checkbox(
+                            "Invert data (reverse order)", 
+                            value=st.session_state.invert_data,
+                            key="invert_file_checkbox",
+                            help="Enable if your data is recorded in cooling mode (temperature decreasing) but represents a heating experiment"
+                        )
+                    
+                    with col2:
+                        if st.button("Load Data", type="primary", key="load_file_btn"):
+                            # Apply inversion if checkbox is checked
+                            st.session_state.experimental_data = invert_data_if_needed(raw_data, invert_checkbox)
+                            st.session_state.invert_data = invert_checkbox
+                            st.session_state.data_loaded = True
+                            st.success(f"Loaded {len(st.session_state.experimental_data)} data points")
+                            if invert_checkbox:
+                                st.info("Data has been inverted (order reversed) for heating analysis")
+                            # Reset fitting state when new data is loaded
+                            st.session_state.fitting_complete = False
+                            st.session_state.fit_results = None
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
         
         else:  # Example data
-            if st.button("Load Example Data"):
-                example_data = """20\t0.0045
+            # NEW: Checkbox for data inversion for example data
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                invert_checkbox = st.checkbox(
+                    "Invert data (reverse order)", 
+                    value=st.session_state.invert_data,
+                    key="invert_example_checkbox",
+                    help="Enable if your data is recorded in cooling mode (temperature decreasing) but represents a heating experiment"
+                )
+            
+            with col2:
+                if st.button("Load Example Data", key="load_example_btn"):
+                    example_data = """20\t0.0045
 40\t0.004787988
 60\t0.005075916
 80\t0.005363555
 100\t0.005650042
 120\t0.005932612
 140\t0.006203565"""
-                st.session_state.experimental_data = parse_data_cached(example_data)
-                st.session_state.data_loaded = True
-                st.success(f"Loaded {len(st.session_state.experimental_data)} example data points")
-                # Reset fitting state when new data is loaded
-                st.session_state.fitting_complete = False
-                st.session_state.fit_results = None
+                    raw_data = parse_data_cached(example_data)
+                    # Apply inversion if checkbox is checked
+                    st.session_state.experimental_data = invert_data_if_needed(raw_data, invert_checkbox)
+                    st.session_state.invert_data = invert_checkbox
+                    st.session_state.data_loaded = True
+                    st.success(f"Loaded {len(st.session_state.experimental_data)} example data points")
+                    if invert_checkbox:
+                        st.info("Data has been inverted (order reversed) for heating analysis")
+                    # Reset fitting state when new data is loaded
+                    st.session_state.fitting_complete = False
+                    st.session_state.fit_results = None
         
         st.divider()
         
@@ -1777,6 +1835,7 @@ R²: {st.session_state.fit_results['r2']:.6f}
 χ²: {st.session_state.fit_results['chi2']:.6f}
 N points: {st.session_state.fit_results['N_points']}
 Fitted parameters: {st.session_state.fit_results['n_free_params']}
+Data inverted: {st.session_state.invert_data}
 
 MODEL PARAMETERS
 ================
