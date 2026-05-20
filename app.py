@@ -14,6 +14,7 @@ from statsmodels.graphics.tsaplots import plot_acf
 import warnings
 warnings.filterwarnings('ignore')
 
+
 # ============================================
 # КОНФИГУРАЦИЯ И ИНИЦИАЛИЗАЦИЯ
 # ============================================
