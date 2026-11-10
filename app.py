@@ -382,43 +382,54 @@ def create_plot3_cached(fit_results: Dict[str, Any], style: Dict[str, Any]) -> p
     chem_contrib = fit_results['chem_contrib']
     residue = fit_results['params']['residue']
     
-    # Определяем направление изменения температуры (нагрев или охлаждение)
-    T_diff = T[-1] - T[0]
+    # Определяем направление по разнице медиан (надежнее, чем по крайним точкам)
+    mid_idx = len(T) // 2
+    T_diff = np.median(T[mid_idx:]) - np.median(T[:mid_idx])
     
-    if T_diff > 0:  # Нагрев (температура растёт)
-        # Тепловое изменение: расширение при нагреве (положительное)
+    if T_diff > 0:  # Нагрев (Heating)
         thermal_start = thermal_contrib[0] + residue
         thermal_changes = (thermal_contrib + residue) - thermal_start
-        
-        # Химическое изменение: сжатие при дегидратации (отрицательное)
         chem_end = chem_contrib[-1] + residue
         chem_changes = chem_end - (chem_contrib + residue)
-        
-    else:  # Охлаждение (температура падает)
-        # Тепловое изменение: сжатие при охлаждении (отрицательное)
+        direction = "Heating"
+    else:  # Охлаждение (Cooling)
         thermal_end = thermal_contrib[-1] + residue
         thermal_changes = (thermal_contrib + residue) - thermal_end
-        
-        # Химическое изменение: расширение при гидратации (положительное)
         chem_start = chem_contrib[0] + residue
         chem_changes = (chem_contrib + residue) - chem_start
+        direction = "Cooling"
     
-    bar_width = (T[1] - T[0]) * 0.7 if len(T) > 1 else 10
-    ax.bar(T - bar_width/2, thermal_changes, width=bar_width, 
-           color=style['bar_thermal_color'], alpha=0.7, label='Δ Thermal')
-    ax.bar(T + bar_width/2, chem_changes, width=bar_width, 
-           color=style['bar_chemical_color'], alpha=0.7, label='Δ Chemical')
+    # ИСПОЛЬЗУЕМ fill_between ВМЕСТО bar
+    # Это работает для любых шагов и диапазонов температур
+    ax.fill_between(T, 0, thermal_changes, 
+                    color=style['bar_thermal_color'], alpha=0.5, 
+                    label='Δ Thermal')
+    
+    ax.fill_between(T, 0, chem_changes, 
+                    color=style['bar_chemical_color'], alpha=0.5, 
+                    label='Δ Chemical')
+    
+    # Добавляем линии по контуру, чтобы график не был "размытым"
+    ax.plot(T, thermal_changes, color=style['bar_thermal_color'], linewidth=1.2)
+    ax.plot(T, chem_changes, color=style['bar_chemical_color'], linewidth=1.2)
+    
+    # Нулевая линия — критически важна для Cooling (значения могут быть отрицательными)
+    ax.axhline(0, color='black', linewidth=0.8, linestyle='--', alpha=0.6)
     
     ax.set_xlabel('Temperature (°C)', fontweight='bold', fontsize=11)
     ax.set_ylabel('Change in ΔL/L₀', fontweight='bold', fontsize=11)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3, linestyle='--', axis='y')
     
+    # Автоматически подстраиваем пределы, чтобы оставить отступы
+    y_min, y_max = ax.get_ylim()
+    padding = (y_max - y_min) * 0.1
+    ax.set_ylim(y_min - padding, y_max + padding)
+    
     # Добавляем аннотацию о направлении
-    direction = "Heating" if T_diff > 0 else "Cooling"
     ax.text(0.98, 0.98, direction, transform=ax.transAxes,
            ha='right', va='top', fontweight='bold',
-           bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+           bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.9))
     
     fig.set_dpi(600)
     return fig
